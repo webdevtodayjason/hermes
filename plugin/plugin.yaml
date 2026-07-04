@@ -1,0 +1,15 @@
+name: familiar               # registry name; installs to ~/.hermes/plugins/familiar/
+version: "0.2.0"
+manifest_version: 1
+description: "Hermes Familiar — ESP32-S3 desk companion driven live by gateway hooks over USB serial (state, tool activity, approvals, device-started actions)."
+author: "Titanium Computing"
+kind: standalone             # opt-in via plugins.enabled
+hooks:                       # informational; real wiring is register() in __init__.py
+  - on_session_start
+  - pre_llm_call
+  - pre_tool_call
+  - post_tool_call
+  - post_llm_call
+  - on_session_end
+  - pre_approval_request
+  - post_approval_response

@@ -1,6 +1,6 @@
 # Hermes Familiar for Waveshare ESP32-S3-Touch-LCD-2.8
 
-A physical Hermes Agent familiar: green-phosphor portrait, SD-card animations, touch controls, and a bidirectional USB serial bridge into Hermes activity.
+A physical Hermes Agent familiar: green-phosphor portrait, SD-card animations, touch controls, and a native Hermes gateway plugin that drives it live over USB — agent state, tool activity, approvals, and device-started actions.
 
 ## Verified hardware
 
@@ -66,37 +66,50 @@ Expected boot lines:
 {"hello":"hermes-buddy","transport":"serial+ble-nus"}
 ```
 
-## Run the USB bridge
+## Install as a Hermes plugin (recommended)
 
-See also [`docs/HERMES_INTEGRATION.md`](docs/HERMES_INTEGRATION.md) for the native Hermes API/event/cron integration contract and launchd helper.
-
-```bash
-python3 scripts/hermes_serial_bridge.py --port /dev/cu.usbmodem101 --interval 1
-```
-
-The bridge reads `~/.hermes/state.db` in read-only mode and creates/uses:
-
-```text
-~/.hermes/familiar_actions.json
-```
-
-Optional native Hermes API mode:
+The familiar is a native Hermes gateway plugin: hooks push live agent state to
+the device the moment it changes (no polling, no separate daemon), and the
+device's touch controls act on the real gateway.
 
 ```bash
-API_SERVER_KEY=<key> python3 scripts/hermes_serial_bridge.py \
-  --port /dev/cu.usbmodem101 \
-  --api-url http://127.0.0.1:8642
+./install.sh          # pyserial into the gateway venv + hermes plugins install/enable
+hermes gateway restart
 ```
 
-When `--api-url` and `--api-key`/`API_SERVER_KEY` are present, the bridge runs in native Hermes API mode:
+That's it. The plugin auto-detects the device on any `/dev/cu.usbmodem*`
+(macOS) or `/dev/ttyACM*` (Linux) port, survives unplug/replug, and idles
+quietly when no device is present. `/familiar` in any Hermes session shows the
+link status.
 
-- Page 2 `start` can create a real `/v1/runs` server-side Hermes run.
-- The bridge subscribes to `/v1/runs/{run_id}/events` SSE and forwards compact tool/lifecycle/approval events to the device.
-- Page 2 `cancel` uses `/v1/runs/{run_id}/stop`.
-- Permission decisions use `/v1/runs/{run_id}/approval`.
-- Configured cron jobs can be triggered/paused/resumed through `/api/jobs/*`.
+What the device shows/does in plugin mode:
 
-Without API mode, the bridge preserves the local CLI subprocess fallback.
+- **Live state** — thinking/tool-activity/idle from gateway hooks across ALL
+  platforms (telegram, slack, cron, kanban workers), not just one surface.
+- **Message ticker** — assistant replies land on Page 1 as they happen.
+- **Real approvals** — when the gateway blocks on a dangerous-command
+  approval, the device pulses ALLOW/DENY; a tap calls the same resolver as
+  `/approve` / `/deny`. Approvals resolved elsewhere clear the device too.
+- **Actions** — Page 2 START runs the first enabled action from
+  `~/.hermes/familiar_actions.json` as a `hermes chat -q` subprocess;
+  PAUSE/CANCEL signal it.
+
+See [`docs/HERMES_INTEGRATION.md`](docs/HERMES_INTEGRATION.md) for the full
+contract.
+
+## Standalone bridge (dev fallback)
+
+For development without a gateway (or on a machine without Hermes), the
+original polling bridge still works:
+
+```bash
+python3 scripts/hermes_serial_bridge.py --port /dev/cu.usbmodem2101 --interval 1
+```
+
+It reads `~/.hermes/state.db` read-only and shares the same
+`~/.hermes/familiar_actions.json`. With `--api-url` + `--api-key` it can also
+drive `/v1/runs`, SSE events, and `/api/jobs/*` on a remote Hermes API server
+— see the integration doc.
 
 Default action slot:
 
@@ -246,7 +259,10 @@ Copy `sdcard/hermes-buddy` to the root of the FAT32 SD card.
 
 ## Native extension status
 
-USB serial is the always-on verified transport. Optional native Hermes API mode turns Page 2 into a real `/v1/runs` and `/api/jobs` control surface, including `/approval` decisions for runs started through the API bridge. CLI fallback remains available when the API server/key are not configured.
+The familiar ships as a first-class Hermes plugin (`plugin/`, installed name
+`familiar`): in-gateway hooks drive the device in real time and device taps
+resolve real gateway approvals — no API server or polling required. The
+standalone bridge remains for gateway-less development and remote API mode.
 
 Current board bring-up status from the latest flash:
 
