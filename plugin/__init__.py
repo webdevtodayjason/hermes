@@ -41,11 +41,14 @@ from pathlib import Path
 
 from . import actions as _actions
 from . import feeds as _feeds
+from . import voice as _voice
 from .serial_link import SerialLink
 
 logger = logging.getLogger("familiar")
 
 _started = {"at": time.time()}   # gateway (module load) time, for the vitals page
+_voice_enabled = True            # familiar_actions.json {"voice":{"enabled":false}} to kill
+_voice_port = 8765
 _pages = {"at": 0.0}
 _PAGES_REFRESH_SECS = 60.0
 
@@ -65,6 +68,10 @@ NOTIFY_SCHEMA = {
                 "type": "string",
                 "enum": ["alert", "ack", "tap", "none"],
                 "description": "Chirp to play (default alert)",
+            },
+            "speak": {
+                "type": "boolean",
+                "description": "Also speak the message aloud through the device speaker (default false)",
             },
         },
         "required": ["message"],
@@ -248,6 +255,7 @@ def _on_pre_approval(command="", description="", session_key="", surface="", **k
     _set_msg(text)
     _push({"type": "permission", "id": str(session_key), "text": text,
            "choices": ["once", "deny"]})
+    _say_async(f"Hermes needs an approval: {text}", only_while_pending=str(session_key))
 
 
 def _on_post_approval(session_key="", choice="", **kw):
@@ -255,6 +263,28 @@ def _on_post_approval(session_key="", choice="", **kw):
         _pending.pop(str(session_key), None)
     _set_msg(f"approval: {choice or 'resolved'}")
     _push()
+
+
+# Kanban worker fleet on the ticker; a blocked task is a real alert.
+
+def _on_kanban_claimed(task_id="", assignee="", **kw):
+    with _lock:
+        _entries.appendleft(f"{datetime.now().strftime('%H:%M')} k: {assignee or 'worker'} claimed {task_id}")
+    _push()
+
+
+def _on_kanban_completed(task_id="", summary="", **kw):
+    note = _actions.compact(str(summary or task_id), 60)
+    with _lock:
+        _entries.appendleft(f"{datetime.now().strftime('%H:%M')} k: done {note}")
+    _push()
+
+
+def _on_kanban_blocked(task_id="", reason="", **kw):
+    msg = _actions.compact(f"kanban blocked: {reason or task_id}", 120)
+    _set_msg(msg)
+    _push({"type": "notify", "msg": msg, "sound": "alert"})
+    _say_async(f"A kanban task is blocked. {reason or ''}")
 
 
 # --------------------------------------------------------------------------
@@ -299,25 +329,71 @@ def _handle_device_line(evt: dict) -> None:
 # registration
 # --------------------------------------------------------------------------
 
-def _tool_notify(message="", sound="alert", **kw) -> str:
-    """familiar_notify tool handler — banner + chirp on the desk device."""
+def _say_url(text: str) -> str | None:
+    """Best-effort TTS clip URL; None when voice is off/unavailable."""
+    if not _voice_enabled:
+        return None
+    try:
+        return _voice.say_url(text, port=_voice_port)
+    except Exception:
+        logger.exception("familiar say_url failed")
+        return None
+
+
+def _say_async(text: str, only_while_pending: str | None = None) -> None:
+    """Render + send speech without blocking the calling (agent) thread.
+
+    ``only_while_pending``: skip the send if that approval resolved while the
+    clip was rendering — nobody wants a voice announcing a settled question.
+    """
+    if not _voice_enabled or _link is None:
+        return
+
+    def _work():
+        url = _say_url(text)
+        if not url:
+            return
+        if only_while_pending is not None:
+            with _lock:
+                if only_while_pending not in _pending:
+                    return
+        _link.send({"type": "say", "url": url})
+
+    threading.Thread(target=_work, name="familiar-say", daemon=True).start()
+
+
+def _tool_notify(args=None, **kw) -> str:
+    """familiar_notify tool handler — banner + chirp (+ speech) on the desk.
+
+    Registry calling convention is ``handler(args_dict, **kwargs)``.
+    """
     try:
         from tools.registry import tool_error, tool_result
     except ImportError:  # outside the hermes runtime (tests)
         tool_result = lambda **k: json.dumps(k)          # noqa: E731
         tool_error = lambda m, **k: json.dumps({"error": str(m), **k})  # noqa: E731
+    args = args if isinstance(args, dict) else {}
     if _link is None or not _link.connected:
         return tool_error("familiar device not connected")
-    msg = _actions.compact(str(message or ""), 120)
+    msg = _actions.compact(str(args.get("message") or ""), 120)
     if not msg:
         return tool_error("message is required")
+    sound = args.get("sound", "alert")
     if sound not in ("alert", "ack", "tap", "none"):
         sound = "alert"
-    _link.send({"type": "notify", "msg": msg, "sound": sound})
+    frame = {"type": "notify", "msg": msg, "sound": sound}
+    spoke = False
+    if args.get("speak"):
+        url = _say_url(msg)
+        if url:
+            frame["say"] = url
+            frame["sound"] = "none"   # the voice replaces the chirp
+            spoke = True
+    _link.send(frame)
     with _lock:
         _entries.appendleft(f"{datetime.now().strftime('%H:%M')} !: {_actions.compact(msg, 70)}")
-    logger.info("push: notify len=%d sound=%s", len(msg), sound)
-    return tool_result(success=True, delivered=msg)
+    logger.info("push: notify len=%d sound=%s speak=%s", len(msg), sound, spoke)
+    return tool_result(success=True, delivered=msg, spoke=spoke)
 
 
 def _slash_familiar(raw_args: str = "") -> str:
@@ -337,9 +413,12 @@ def _is_gateway_process() -> bool:
 
 
 def register(ctx) -> None:
-    global _link, _jobs
+    global _link, _jobs, _voice_enabled, _voice_port
     cfg = _actions.load_config()
     _jobs = _actions.JobManager(cfg.get("actions"))
+    vc = cfg.get("voice") or {}
+    _voice_enabled = bool(vc.get("enabled", True))
+    _voice_port = int(vc.get("port", 8765))
 
     if _is_gateway_process():
         serial_cfg = cfg.get("serial") or {}
@@ -361,6 +440,9 @@ def register(ctx) -> None:
     ctx.register_hook("on_session_end", _on_session_end)
     ctx.register_hook("pre_approval_request", _on_pre_approval)
     ctx.register_hook("post_approval_response", _on_post_approval)
+    ctx.register_hook("kanban_task_claimed", _on_kanban_claimed)
+    ctx.register_hook("kanban_task_completed", _on_kanban_completed)
+    ctx.register_hook("kanban_task_blocked", _on_kanban_blocked)
     ctx.register_command(
         "familiar",
         handler=_slash_familiar,

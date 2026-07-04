@@ -7,6 +7,7 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <HTTPClient.h>
 #include <driver/i2s.h>
 #include "generated_frames.h"
 
@@ -599,12 +600,65 @@ static void chirpTone(uint16_t hz, uint16_t ms) {
   i2s_zero_dma_buffer(I2S_NUM_0);
 }
 
+static volatile bool sayBusy = false;
+
 static void chirp(const char* kind) {
+  if (sayBusy) return;  // never chirp over speech
   if (!strcmp(kind, "boot")) { chirpTone(740, 35); chirpTone(988, 45); }
   else if (!strcmp(kind, "tap")) chirpTone(1200, 20);
   else if (!strcmp(kind, "alert")) { chirpTone(988, 35); chirpTone(740, 60); }
   else if (!strcmp(kind, "ack")) { chirpTone(880, 25); chirpTone(1320, 35); }
   else chirpTone(880, 25);
+}
+
+// ---- speech: stream raw s16le 16kHz mono PCM from a LAN URL into I2S ------
+// The host renders TTS to exactly the I2S format, so playback is a straight
+// HTTP read -> i2s_write pipe on its own FreeRTOS task (UI stays live).
+
+static String sayPendingUrl;
+
+static void sayTask(void*) {
+  HTTPClient http;
+  http.setConnectTimeout(3000);
+  if (http.begin(sayPendingUrl)) {
+    int code = http.GET();
+    if (code == 200) {
+      WiFiClient* stream = http.getStreamPtr();
+      int total = http.getSize();
+      int got = 0;
+      uint8_t buf[1024];
+      uint32_t lastData = millis();
+      while (http.connected() && (total < 0 || got < total) && millis() - lastData < 3000) {
+        size_t avail = stream->available();
+        if (avail) {
+          int n = stream->readBytes(buf, min(avail, sizeof(buf)));
+          size_t written = 0;
+          i2s_write(I2S_NUM_0, buf, n, &written, pdMS_TO_TICKS(500));
+          got += n;
+          lastData = millis();
+        } else {
+          vTaskDelay(pdMS_TO_TICKS(5));
+        }
+      }
+      i2s_zero_dma_buffer(I2S_NUM_0);
+    } else {
+      Serial.printf("{\"say\":\"http-%d\"}\n", code);
+    }
+    http.end();
+  }
+  sayBusy = false;
+  vTaskDelete(nullptr);
+}
+
+static void startSay(const char* url) {
+  if (!url || !url[0]) return;
+  if (!wifiReady) { Serial.println("{\"say\":\"no-wifi\"}"); return; }
+  if (!audioReady || sayBusy) return;
+  sayPendingUrl = url;
+  sayBusy = true;
+  if (xTaskCreatePinnedToCore(sayTask, "say", 8192, nullptr, 1, nullptr, 0) != pdPASS) {
+    sayBusy = false;
+  }
 }
 
 static void initPowerDiagnostics() {
@@ -1036,8 +1090,17 @@ static void applyJsonLine(const String &line) {
     toastUntilMs = millis() + 1000UL * (uint32_t)(doc["secs"] | 8);
     const char* snd = doc["sound"] | "alert";
     if (strcmp(snd, "none") != 0) chirp(snd);
+    const char* say = doc["say"] | "";
+    if (say[0]) startSay(say);
     triggerNamedMood("host", "happy", false, false);
     st.dirty = true;
+    return;
+  }
+  if (doc["type"] == "say") {
+    st.connected = true;
+    st.lastSeenMs = millis();
+    const char* say = doc["url"] | "";
+    if (say[0]) startSay(say);
     return;
   }
   if (doc["type"] == "page") {

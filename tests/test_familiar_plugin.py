@@ -57,6 +57,7 @@ def wired(monkeypatch, tmp_path):
     familiar.register(ctx)                       # not a gateway argv -> no serial
     link = FakeLink()
     monkeypatch.setattr(familiar, "_link", link)
+    monkeypatch.setattr(familiar, "_voice_enabled", False)  # no real TTS/server in tests
     monkeypatch.setattr(familiar, "_stats", {"total": 0, "tokens_today": 0,
                                              "tools_today": 0, "at": time.time()})
     familiar._turns.clear()
@@ -149,19 +150,37 @@ def test_user_message_lands_on_ticker(wired):
 
 def test_notify_tool_sends_banner_frame(wired):
     ctx, link = wired
-    import json as _json
-    out = _json.loads(familiar._tool_notify(message="Backup finished", sound="ack"))
+    out = json.loads(familiar._tool_notify({"message": "Backup finished", "sound": "ack"}))
     assert out["success"] is True
     frame = [f for f in link.sent if f.get("type") == "notify"][-1]
     assert frame == {"type": "notify", "msg": "Backup finished", "sound": "ack"}
     assert "familiar_notify" in ctx.tools
 
 
+def test_notify_tool_speak_attaches_clip_url(wired, monkeypatch):
+    _, link = wired
+    monkeypatch.setattr(familiar, "_say_url", lambda t: "http://10.0.0.5:8765/x.pcm")
+    out = json.loads(familiar._tool_notify({"message": "Build done", "speak": True}))
+    assert out["spoke"] is True
+    frame = [f for f in link.sent if f.get("type") == "notify"][-1]
+    assert frame["say"] == "http://10.0.0.5:8765/x.pcm"
+    assert frame["sound"] == "none"   # voice replaces the chirp
+
+
 def test_notify_tool_errors_without_device(wired, monkeypatch):
-    import json as _json
     monkeypatch.setattr(familiar, "_link", None)
-    out = _json.loads(familiar._tool_notify(message="hello"))
+    out = json.loads(familiar._tool_notify({"message": "hello"}))
     assert "not connected" in out["error"]
+
+
+def test_kanban_blocked_raises_desk_alert(wired):
+    ctx, link = wired
+    ctx.hooks["kanban_task_blocked"](task_id="T-9", reason="needs prod creds")
+    frame = [f for f in link.sent if f.get("type") == "notify"][-1]
+    assert "needs prod creds" in frame["msg"]
+    ctx.hooks["kanban_task_completed"](task_id="T-8", summary="deployed ok")
+    assert any("k: done deployed ok" in e
+               for e in link.frames("state")[-1]["entries"])
 
 
 def test_cron_page_formats_jobs(monkeypatch, tmp_path):
