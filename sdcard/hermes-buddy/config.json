@@ -1,0 +1,78 @@
+{
+  "name": "Hermes Familiar",
+  "version": 1,
+  "format": "raw4-indexed-240x320",
+  "layout": "option-c-square-portrait-bottom-console",
+  "width": 240,
+  "height": 320,
+  "bottom_band_px": 68,
+  "palette_rgb565": [
+    "0x0000",
+    "0x00C0",
+    "0x03E0",
+    "0x57EA"
+  ],
+  "animations": {
+    "idle": {
+      "frames": [
+        "000.raw4"
+      ],
+      "frame_ms": 180
+    },
+    "blink": {
+      "frames": [
+        "000.raw4",
+        "001.raw4",
+        "002.raw4"
+      ],
+      "frame_ms": 180
+    },
+    "wink": {
+      "frames": [
+        "000.raw4",
+        "001.raw4"
+      ],
+      "frame_ms": 180
+    },
+    "smile": {
+      "frames": [
+        "000.raw4",
+        "001.raw4"
+      ],
+      "frame_ms": 180
+    },
+    "happy": {
+      "frames": [
+        "000.raw4",
+        "001.raw4",
+        "002.raw4"
+      ],
+      "frame_ms": 180
+    },
+    "sleep": {
+      "frames": [
+        "000.raw4",
+        "001.raw4",
+        "002.raw4"
+      ],
+      "frame_ms": 700
+    },
+    "thinking": {
+      "frames": [
+        "000.raw4",
+        "001.raw4",
+        "002.raw4",
+        "003.raw4"
+      ],
+      "frame_ms": 220
+    },
+    "waiting": {
+      "frames": [
+        "000.raw4",
+        "001.raw4"
+      ],
+      "frame_ms": 180
+    }
+  },
+  "notes": "Generated from square source frames; bottom console is intentionally black for live firmware text."
+}

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nous.hermes-familiar-bridge</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/sem/Projects/hermes-buddy-esp32s3/scripts/run_bridge.sh</string>
+    <string>--port</string>
+    <string>/dev/cu.usbmodem101</string>
+    <string>--interval</string>
+    <string>1</string>
+    <!-- Optional native API mode. Keep API_SERVER_KEY out of this template.
+         Add --api-url here only after your Hermes gateway API server is running. -->
+    <!-- <string>--api-url</string> -->
+    <!-- <string>http://127.0.0.1:8642</string> -->
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/sem/Projects/hermes-buddy-esp32s3</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/sem/Library/Logs/hermes-familiar-bridge.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/sem/Library/Logs/hermes-familiar-bridge.err.log</string>
+</dict>
+</plist>
