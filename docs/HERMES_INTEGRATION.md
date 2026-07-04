@@ -24,6 +24,21 @@ A full state frame is also sent as a 5 s heartbeat (firmware marks the host
 offline after 30 s). Daily aggregates (sessions/tokens/tools) are read from
 `state.db` read-only at most once a minute.
 
+Additional host→device frames (v0.3.0):
+
+| Frame | Device effect |
+|---|---|
+| `{"type":"notify","msg":"…","sound":"alert\|ack\|tap\|none","secs":8}` | banner toast on any page + chirp (`familiar_notify` agent tool) |
+| `{"type":"page","slot":0\|1,"title":"…","lines":["…","…"]}` | fills Page 4 (cron, slot 0) / Page 5 (vitals, slot 1); pushed every 60 s from `plugin/feeds.py` |
+| `{"type":"config","wifi":{"ssid":"…","password":"…"}}` | merges into SD `/hermes-buddy/config.json`, acks `{"ack":"config",…}`, reconnects Wi-Fi live |
+
+`event:message` frames also raise a 4 s banner toast; toasts never cover a
+pending approval and are dismissed by page navigation.
+
+The plugin registers the **`familiar_notify` tool** (toolset `familiar`,
+gated on a connected device) so the agent — including cron-job turns — can
+deliberately ping the desk with a banner + chirp.
+
 Unlike `embody` (voice-gated face), the familiar reflects **all** platforms —
 telegram, slack, cron, kanban workers — it's a desk companion for the whole
 gateway.

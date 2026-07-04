@@ -86,13 +86,25 @@ What the device shows/does in plugin mode:
 
 - **Live state** — thinking/tool-activity/idle from gateway hooks across ALL
   platforms (telegram, slack, cron, kanban workers), not just one surface.
-- **Message ticker** — assistant replies land on Page 1 as they happen.
+- **Message ticker** — your messages (`u:`) and Hermes replies (`a:`) land on
+  Page 1 as they happen; every reply also toasts a gold `> HERMES:` banner in
+  the bottom band for 4s on whatever page you're on.
+- **`familiar_notify` agent tool** — Hermes itself can ping the desk: banner
+  + chirp. "Ping my desk when the build finishes" now works, and cron jobs
+  can reach the device the same way.
 - **Real approvals** — when the gateway blocks on a dangerous-command
-  approval, the device pulses ALLOW/DENY; a tap calls the same resolver as
-  `/approve` / `/deny`. Approvals resolved elsewhere clear the device too.
+  approval, the device jumps to ALLOW/DENY with an alert chirp, pulses
+  red/amber, and re-chirps every 60s until answered; a tap calls the same
+  resolver as `/approve` / `/deny`.
+- **Cron page (4)** — next runs + last result for active scheduled jobs.
+- **Gateway page (5)** — uptime, platform health (telegram/slack), sessions,
+  tools, and tokens today. Both pages refresh every minute, host-formatted.
 - **Actions** — Page 2 START runs the first enabled action from
   `~/.hermes/familiar_actions.json` as a `hermes chat -q` subprocess;
   PAUSE/CANCEL signal it.
+- **Wi-Fi provisioning over USB** — no SD-card shuffling:
+  `{"type":"config","wifi":{"ssid":"...","password":"..."}}` on the serial
+  port writes the SD config and connects live.
 
 See [`docs/HERMES_INTEGRATION.md`](docs/HERMES_INTEGRATION.md) for the full
 contract.

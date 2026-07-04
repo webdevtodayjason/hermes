@@ -163,7 +163,9 @@ enum UiPage : uint8_t {
   PAGE_RECENT = 1,
   PAGE_ACTIONS = 2,
   PAGE_DEVICE = 3,
-  PAGE_COUNT = 4,
+  PAGE_CRON = 4,
+  PAGE_VITALS = 5,
+  PAGE_COUNT = 6,
 };
 
 static UiPage uiPage = PAGE_STATUS;
@@ -205,6 +207,22 @@ struct BuddyState {
   uint16_t touchY = 0;
   bool dirty = true;
 } st;
+
+// Toast: host-pushed banner that takes over the console band on ANY page for a
+// few seconds (incoming replies + familiar_notify pings), so activity is never
+// invisible just because the user is on the wrong page.
+static String toastText;
+static uint32_t toastUntilMs = 0;
+
+// Host-rendered info pages (slot 0 = cron jobs, slot 1 = gateway vitals).
+// The host formats the lines; firmware just displays them.
+struct HostPage {
+  String title;
+  String l1;
+  String l2;
+  bool set = false;
+};
+static HostPage hostPages[2];
 
 static uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) { return gfx->color565(r, g, b); }
 static uint16_t bswap565(uint16_t v) { return (uint16_t)((v << 8) | (v >> 8)); }
@@ -772,7 +790,10 @@ static void redraw() {
   st.dirty = false;
   bool live = st.connected && (millis() - st.lastSeenMs < 30000);
   const char* group = stateGroup(live);
-  uint16_t mood = (!strcmp(group, "sleep")) ? DIM : (st.waiting > 0 ? RED : (st.running > 0 ? ORANGE : GREEN));
+  // Pending approval pulses RED<->ORANGE (the 220ms tick keeps repainting).
+  uint16_t mood = (!strcmp(group, "sleep")) ? DIM
+                : (st.waiting > 0 ? (((millis() / 400) & 1) ? RED : ORANGE)
+                : (st.running > 0 ? ORANGE : GREEN));
 
   if (!drawSDRaw4(group)) drawGeneratedFrame(frameForState(live));
 
@@ -782,6 +803,16 @@ static void redraw() {
   gfx->fillRect(0, CONSOLE_Y, W, H - CONSOLE_Y, BG);
   gfx->drawFastHLine(0, CONSOLE_Y, W, mood);
   gfx->drawFastHLine(0, CONSOLE_Y + 2, W, DIM);
+
+  // Toast takes over the band on ANY page (never over a pending approval).
+  if (toastUntilMs && millis() < toastUntilMs && !(st.action.active || st.waiting > 0)) {
+    gfx->setTextSize(1);
+    gfx->setTextColor(GOLD, BG);
+    gfx->setCursor(10, 260);
+    gfx->print("> HERMES:");
+    drawWrapped(toastText, 10, 276, 34, 2, INK);
+    return;
+  }
 
   gfx->setTextSize(1);
   gfx->setTextColor(mood, BG);
@@ -830,6 +861,19 @@ static void redraw() {
       gfx->drawFastVLine(160, 284, 30, DIM);
       gfx->print(" START    PAUSE    CANCEL");
     }
+  } else if (uiPage == PAGE_CRON || uiPage == PAGE_VITALS) {
+    HostPage &hp = hostPages[uiPage == PAGE_CRON ? 0 : 1];
+    gfx->setCursor(10, 260);
+    gfx->print("> ");
+    gfx->print(hp.set ? hp.title : String(uiPage == PAGE_CRON ? "CRON JOBS" : "GATEWAY"));
+    gfx->setCursor(10, 276);
+    String a = hp.set ? hp.l1 : String("no data from host yet");
+    if (a.length() > 34) a = a.substring(0, 34);
+    gfx->print(a);
+    gfx->setCursor(10, 292);
+    String b = hp.l2;
+    if (b.length() > 34) b = b.substring(0, 34);
+    gfx->print(b);
   } else {
     gfx->setCursor(10, 260);
     gfx->print("> DEVICE");
@@ -886,6 +930,7 @@ static void goPage(int delta) {
   int next = ((int)uiPage + delta) % (int)PAGE_COUNT;
   if (next < 0) next += PAGE_COUNT;
   uiPage = (UiPage)next;
+  toastUntilMs = 0;   // navigating dismisses a banner
   st.msg = String("page ") + next;
   st.dirty = true;
 }
@@ -971,8 +1016,66 @@ static void applyJsonLine(const String &line) {
     st.connected = true;
     st.lastSeenMs = millis();
     if (doc["msg"].is<const char*>()) st.msg = doc["msg"].as<const char*>();
-    if (doc["event"] == "message") triggerNamedMood("host", "blink", false, false);
+    if (doc["event"] == "message") {
+      triggerNamedMood("host", "blink", false, false);
+      if (doc["msg"].is<const char*>()) {
+        toastText = doc["msg"].as<const char*>();
+        toastUntilMs = millis() + 4000;
+      }
+    }
     st.dirty = true;
+    return;
+  }
+  if (doc["type"] == "notify") {
+    // Deliberate ping from the agent (familiar_notify tool): banner + chirp.
+    st.connected = true;
+    st.lastSeenMs = millis();
+    const char* m = doc["msg"] | "";
+    st.msg = m;
+    toastText = m;
+    toastUntilMs = millis() + 1000UL * (uint32_t)(doc["secs"] | 8);
+    const char* snd = doc["sound"] | "alert";
+    if (strcmp(snd, "none") != 0) chirp(snd);
+    triggerNamedMood("host", "happy", false, false);
+    st.dirty = true;
+    return;
+  }
+  if (doc["type"] == "page") {
+    int slot = doc["slot"] | 0;
+    if (slot < 0 || slot > 1) slot = 0;
+    hostPages[slot].title = String((const char*)(doc["title"] | (slot == 0 ? "CRON" : "GATEWAY")));
+    hostPages[slot].l1 = String((const char*)(doc["lines"][0] | ""));
+    hostPages[slot].l2 = String((const char*)(doc["lines"][1] | ""));
+    hostPages[slot].set = true;
+    st.connected = true;
+    st.lastSeenMs = millis();
+    st.dirty = true;
+    return;
+  }
+  if (doc["type"] == "config") {
+    // Serial provisioning: merge received sections into /hermes-buddy/config.json
+    // (today: {"wifi":{"ssid","password"}}), then (re)connect Wi-Fi live.
+    bool ok = false;
+    String why = "no-sd";
+    if (sdReady) {
+      StaticJsonDocument<512> cfg;
+      if (SD_MMC.exists("/hermes-buddy/config.json")) {
+        File rf = SD_MMC.open("/hermes-buddy/config.json", FILE_READ);
+        if (rf) { deserializeJson(cfg, rf); rf.close(); }
+      }
+      if (!doc["wifi"].isNull()) cfg["wifi"] = doc["wifi"];
+      File wf = SD_MMC.open("/hermes-buddy/config.json", FILE_WRITE);
+      if (wf) {
+        serializeJson(cfg, wf);
+        wf.close();
+        ok = true;
+        why = "saved";
+      } else {
+        why = "write-fail";
+      }
+    }
+    sendLine(String("{\"ack\":\"config\",\"ok\":") + (ok ? "true" : "false") + ",\"detail\":\"" + why + "\"}");
+    if (ok && !doc["wifi"].isNull()) initWiFiFromSD();
     return;
   }
   if (doc["type"] == "permission") {
@@ -1175,6 +1278,22 @@ void loop() {
   static uint8_t lastWaiting = 0;
   if (st.waiting > 0 && lastWaiting == 0) chirp("alert");
   lastWaiting = st.waiting > 0 ? 1 : 0;
+
+  // Gentle re-chirp every 60s while an approval sits unanswered.
+  static uint32_t lastWaitChirp = 0;
+  if (st.waiting > 0) {
+    if (millis() - lastWaitChirp > 60000) {
+      lastWaitChirp = millis();
+      chirp("alert");
+    }
+  } else {
+    lastWaitChirp = millis();
+  }
+
+  if (toastUntilMs && millis() >= toastUntilMs) {
+    toastUntilMs = 0;
+    st.dirty = true;
+  }
 
   static uint32_t lastPulse = 0;
   if (millis() - lastPulse > 220) {

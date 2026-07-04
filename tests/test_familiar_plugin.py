@@ -6,6 +6,7 @@ one needs the gateway process.
 """
 from __future__ import annotations
 
+import json
 import sys
 import time
 from pathlib import Path
@@ -22,12 +23,16 @@ class FakeCtx:
     def __init__(self):
         self.hooks: dict[str, object] = {}
         self.commands: dict[str, object] = {}
+        self.tools: dict[str, dict] = {}
 
     def register_hook(self, name, fn):
         self.hooks[name] = fn
 
     def register_command(self, name, handler, description="", args_hint=""):
         self.commands[name] = handler
+
+    def register_tool(self, name, toolset, schema, handler, **kw):
+        self.tools[name] = {"schema": schema, "handler": handler, **kw}
 
 
 class FakeLink:
@@ -132,3 +137,59 @@ def test_default_config_written_and_loaded(monkeypatch, tmp_path):
     cfg = actions.load_config()
     assert cfg["actions"][0]["id"] == "status_brief"
     assert (tmp_path / "familiar_actions.json").exists()
+
+
+def test_user_message_lands_on_ticker(wired):
+    ctx, link = wired
+    ctx.hooks["pre_llm_call"](platform="telegram", session_id="s2",
+                              user_message="What's my schedule?")
+    assert any("u: What's my schedule?" in e
+               for e in link.frames("state")[-1]["entries"])
+
+
+def test_notify_tool_sends_banner_frame(wired):
+    ctx, link = wired
+    import json as _json
+    out = _json.loads(familiar._tool_notify(message="Backup finished", sound="ack"))
+    assert out["success"] is True
+    frame = [f for f in link.sent if f.get("type") == "notify"][-1]
+    assert frame == {"type": "notify", "msg": "Backup finished", "sound": "ack"}
+    assert "familiar_notify" in ctx.tools
+
+
+def test_notify_tool_errors_without_device(wired, monkeypatch):
+    import json as _json
+    monkeypatch.setattr(familiar, "_link", None)
+    out = _json.loads(familiar._tool_notify(message="hello"))
+    assert "not connected" in out["error"]
+
+
+def test_cron_page_formats_jobs(monkeypatch, tmp_path):
+    from plugin import feeds
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    (tmp_path / "cron").mkdir()
+    (tmp_path / "cron" / "jobs.json").write_text(json.dumps({"jobs": [
+        {"name": "Mail watcher", "enabled": True, "state": "active",
+         "last_status": "ok", "next_run_at": time.time() + 3600},
+        {"name": "Paused thing", "enabled": True, "state": "paused"},
+        {"name": "Disabled thing", "enabled": False},
+    ]}))
+    page = feeds.cron_page()
+    assert page["slot"] == 0
+    assert page["title"] == "CRON: 1 ACTIVE"
+    assert len(page["lines"]) == 1
+    assert "Mail watcher ok" in page["lines"][0]
+
+
+def test_vitals_page_reads_gateway_state(monkeypatch, tmp_path):
+    from plugin import feeds
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    (tmp_path / "gateway_state.json").write_text(json.dumps({
+        "platforms": {"telegram": {"state": "connected"},
+                      "slack": {"state": "error"}}}))
+    page = feeds.vitals_page(time.time() - 7500,
+                             {"total": 12, "tokens_today": 48200, "tools_today": 7})
+    assert page["slot"] == 1
+    assert "up 2h05m" in page["lines"][0]
+    assert "te:ok" in page["lines"][0] and "sl:ER" in page["lines"][0]
+    assert "S:12 tools:7 tok:48k" == page["lines"][1]

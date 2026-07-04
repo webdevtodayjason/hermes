@@ -28,6 +28,7 @@ All hook callbacks are **kwargs-tolerant and never raise.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sqlite3
@@ -39,9 +40,36 @@ from datetime import datetime
 from pathlib import Path
 
 from . import actions as _actions
+from . import feeds as _feeds
 from .serial_link import SerialLink
 
 logger = logging.getLogger("familiar")
+
+_started = {"at": time.time()}   # gateway (module load) time, for the vitals page
+_pages = {"at": 0.0}
+_PAGES_REFRESH_SECS = 60.0
+
+NOTIFY_SCHEMA = {
+    "name": "familiar_notify",
+    "description": (
+        "Ping Jason's desk familiar (the ESP32 companion device): shows a banner on "
+        "its screen and plays a chirp. Use when something deserves desk attention — "
+        "a long task finished, a cron job found something important, you are blocked "
+        "waiting on Jason, or a reminder fires. Keep the message under ~100 chars."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "message": {"type": "string", "description": "Short banner text"},
+            "sound": {
+                "type": "string",
+                "enum": ["alert", "ack", "tap", "none"],
+                "description": "Chirp to play (default alert)",
+            },
+        },
+        "required": ["message"],
+    },
+}
 
 # tool name -> friendly activity label on the device (same idea as embody's)
 _TOOL_STATUS = {
@@ -109,9 +137,25 @@ def _refresh_stats() -> None:
         pass
 
 
+def _maybe_push_pages() -> None:
+    """Refresh the device's cron/vitals pages at most once a minute."""
+    if _link is None:
+        return
+    now = time.time()
+    if now - _pages["at"] < _PAGES_REFRESH_SECS:
+        return
+    _pages["at"] = now
+    try:
+        _link.send(_feeds.cron_page())
+        _link.send(_feeds.vitals_page(_started["at"], _stats))
+    except Exception:
+        logger.exception("familiar page feed failed")
+
+
 def _payload() -> dict:
     """Full device state frame (also the heartbeat, sent every 5s)."""
     _refresh_stats()
+    _maybe_push_pages()
     jobs = _jobs.status() if _jobs else {"job_state": "idle", "job_label": ""}
     with _lock:
         running = 1 if _turns or jobs.get("job_state") in ("running", "paused") else 0
@@ -156,9 +200,12 @@ def _on_session_end(session_id="", **kw):
     _push()
 
 
-def _on_pre_llm(platform="", session_id="", **kw):
+def _on_pre_llm(platform="", session_id="", user_message="", **kw):
+    um = _actions.compact(str(user_message or ""), 70)
     with _lock:
         _turns.add(str(session_id or "?"))
+        if um:
+            _entries.appendleft(f"{datetime.now().strftime('%H:%M')} u: {um}")
     _set_msg(f"thinking… ({platform})" if platform else "thinking…")
     if _link is not None:
         logger.info("push: thinking platform=%s connected=%s", platform, _link.connected)
@@ -252,6 +299,27 @@ def _handle_device_line(evt: dict) -> None:
 # registration
 # --------------------------------------------------------------------------
 
+def _tool_notify(message="", sound="alert", **kw) -> str:
+    """familiar_notify tool handler — banner + chirp on the desk device."""
+    try:
+        from tools.registry import tool_error, tool_result
+    except ImportError:  # outside the hermes runtime (tests)
+        tool_result = lambda **k: json.dumps(k)          # noqa: E731
+        tool_error = lambda m, **k: json.dumps({"error": str(m), **k})  # noqa: E731
+    if _link is None or not _link.connected:
+        return tool_error("familiar device not connected")
+    msg = _actions.compact(str(message or ""), 120)
+    if not msg:
+        return tool_error("message is required")
+    if sound not in ("alert", "ack", "tap", "none"):
+        sound = "alert"
+    _link.send({"type": "notify", "msg": msg, "sound": sound})
+    with _lock:
+        _entries.appendleft(f"{datetime.now().strftime('%H:%M')} !: {_actions.compact(msg, 70)}")
+    logger.info("push: notify len=%d sound=%s", len(msg), sound)
+    return tool_result(success=True, delivered=msg)
+
+
 def _slash_familiar(raw_args: str = "") -> str:
     if _link is None:
         return "familiar: serial link inactive in this process (gateway-only)"
@@ -297,4 +365,13 @@ def register(ctx) -> None:
         "familiar",
         handler=_slash_familiar,
         description="Familiar device link status",
+    )
+    ctx.register_tool(
+        name="familiar_notify",
+        toolset="familiar",
+        schema=NOTIFY_SCHEMA,
+        handler=_tool_notify,
+        check_fn=lambda: _link is not None and _link.connected,
+        description="Ping the desk familiar: screen banner + chirp",
+        emoji="🐦",
     )
