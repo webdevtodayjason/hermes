@@ -17,18 +17,33 @@ is a quiet no-op (logged once) so the plugin can never hurt the gateway.
 """
 from __future__ import annotations
 
+import atexit
 import glob
 import json
 import logging
 import queue
+import subprocess
+import sys
 import threading
 import time
+from pathlib import Path
 
 logger = logging.getLogger("familiar.serial")
 
 _PORT_GLOBS = ("/dev/cu.usbmodem*", "/dev/ttyACM*")
 _PROBE_SECS = 2.0
 _RESCAN_SECS = 3.0
+# ESP32-S3 USB-CDC can wedge (deaf serial, Wi-Fi fine) when the host process
+# dies abruptly while holding the port. An esptool-level reset revives it —
+# after this many consecutive failed scan rounds with a port present, try it.
+_UNWEDGE_AFTER_FAILS = 8
+_UNWEDGE_COOLDOWN = 300.0
+
+
+def _find_esptool() -> str | None:
+    for cand in sorted(Path.home().glob(".platformio/packages/tool-esptoolpy*/esptool.py")):
+        return str(cand)
+    return None
 
 
 class SerialLink:
@@ -47,6 +62,8 @@ class SerialLink:
         self._ser = None
         self._stop = threading.Event()
         self._warned_pyserial = False
+        self._scan_fails = 0
+        self._last_unwedge = 0.0
         self.port: str | None = None      # active port when connected
 
     # -- public ----------------------------------------------------------
@@ -70,7 +87,27 @@ class SerialLink:
                 pass
 
     def start(self) -> None:
+        atexit.register(self._drop)   # release the port with proper line-state on exit
         threading.Thread(target=self._run, name="familiar-serial", daemon=True).start()
+
+    def _try_unwedge(self, port: str) -> None:
+        """Hard-reset a present-but-deaf device via esptool (rate-limited)."""
+        now = time.time()
+        if now - self._last_unwedge < _UNWEDGE_COOLDOWN:
+            return
+        self._last_unwedge = now
+        esptool = _find_esptool()
+        if not esptool:
+            logger.warning("familiar port %s deaf but esptool not found — replug to recover", port)
+            return
+        logger.warning("familiar port %s deaf — attempting esptool hard reset", port)
+        try:
+            subprocess.run(
+                [sys.executable, esptool, "--port", port,
+                 "--before", "default_reset", "--after", "hard_reset", "chip_id"],
+                capture_output=True, timeout=45)
+        except Exception as e:
+            logger.warning("familiar unwedge attempt failed: %s", e)
 
     def stop(self) -> None:
         self._stop.set()
@@ -133,13 +170,20 @@ class SerialLink:
         serial_mod = self._serial_module()
         if serial_mod is None:
             return
-        for port in self._candidates():
+        candidates = self._candidates()
+        for port in candidates:
             ser = self._probe(serial_mod, port)
             if ser is not None:
                 self._ser = ser
                 self.port = port
+                self._scan_fails = 0
                 logger.info("familiar connected on %s", port)
                 return
+        if candidates:
+            self._scan_fails += 1
+            if self._scan_fails >= _UNWEDGE_AFTER_FAILS:
+                self._scan_fails = 0
+                self._try_unwedge(candidates[0])
 
     def _drop(self) -> None:
         if self._ser is not None:

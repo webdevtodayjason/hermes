@@ -401,15 +401,28 @@ def _tool_notify(args=None, **kw) -> str:
 
 
 def _slash_familiar(raw_args: str = "") -> str:
+    """/familiar [status] | say <text> | ping <text> — deterministic device tests."""
     if _link is None:
         return "familiar: serial link inactive in this process (gateway-only)"
+    args = str(raw_args or "").strip()
+    if args.lower().startswith("say "):
+        text = args[4:].strip() or "Hello from the familiar."
+        if not _link.connected:
+            return "familiar: no device connected"
+        _say_async(text)
+        return f"familiar: speaking ({len(text)} chars) — rendering, ~3s"
+    if args.lower().startswith("ping"):
+        msg = args[4:].strip() or "ping from /familiar"
+        _link.send({"type": "notify", "msg": _actions.compact(msg, 120), "sound": "alert"})
+        return "familiar: banner + chirp sent"
     with _lock:
         pend = len(_pending)
     port = _link.port if _link.connected else "searching…"
     jobs = _jobs.status() if _jobs else {}
     return (f"familiar: {'connected ' + str(port) if _link.connected else 'no device (' + str(port) + ')'}"
             f" | pending approvals: {pend}"
-            f" | job: {jobs.get('job_state', '?')} ({jobs.get('job_label', '')})")
+            f" | job: {jobs.get('job_state', '?')} ({jobs.get('job_label', '')})"
+            f" | try: /familiar say hello · /familiar ping")
 
 
 def _is_gateway_process() -> bool:
