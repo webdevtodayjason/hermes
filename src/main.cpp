@@ -404,10 +404,12 @@ static void triggerNamedMood(const char* reason, const char* mood, bool updateMs
   strncpy(forcedGroup, mood, sizeof(forcedGroup) - 1);
   forcedGroup[sizeof(forcedGroup) - 1] = 0;
   forcedStartMs = millis();
-  uint32_t hold = 1200;
-  if (!strcmp(mood, "wink")) hold = 2300;
-  else if (!strcmp(mood, "smile")) hold = 3300;
-  else if (!strcmp(mood, "happy")) hold = 3300;
+  // Emote beats, not poses: a wink lands and releases. (Jason: "a wink
+  // should be like a wink" — was 2300/3300 and read as a 3-second leer.)
+  uint32_t hold = 1000;
+  if (!strcmp(mood, "wink")) hold = 700;
+  else if (!strcmp(mood, "smile")) hold = 1300;
+  else if (!strcmp(mood, "happy")) hold = 1500;
   else if (!strcmp(mood, "blink")) hold = 380;
   forcedUntilMs = forcedStartMs + hold;
   if (strcmp(reason, "auto") && strcmp(reason, "host")) st.lastTouchMs = millis();
