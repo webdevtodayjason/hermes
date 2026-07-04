@@ -15,8 +15,8 @@ else
   echo "! gateway venv pip not found at $VENV_PIP — install pyserial into your Hermes python manually"
 fi
 
-hermes plugins install "$HERE/plugin" --force
-hermes plugins enable familiar
+# local install: file:// git clone of this repo, plugin/ subdir (#fragment)
+hermes plugins install "file://$HERE#plugin" --force --enable
 
 echo
 echo "Done. Restart the gateway to activate:  hermes gateway restart"
