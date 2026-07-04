@@ -322,6 +322,10 @@ def _handle_device_line(evt: dict) -> None:
     if cmd == "gesture" and evt.get("gesture") == "shake":
         _push({"type": "event", "event": "gesture", "msg": "shake — Familiar is awake"})
         return
+    if cmd is None:
+        # boot lines, wifi status, say errors ({"say":"http--1"}) — surface them
+        logger.info("device: %s", evt)
+        return
     # touch/swipe/local_* are device-local; ping acks need no reply
 
 
@@ -392,7 +396,7 @@ def _tool_notify(args=None, **kw) -> str:
     _link.send(frame)
     with _lock:
         _entries.appendleft(f"{datetime.now().strftime('%H:%M')} !: {_actions.compact(msg, 70)}")
-    logger.info("push: notify len=%d sound=%s speak=%s", len(msg), sound, spoke)
+    logger.info("push: notify len=%d sound=%s say=%s", len(msg), frame["sound"], frame.get("say", "-"))
     return tool_result(success=True, delivered=msg, spoke=spoke)
 
 

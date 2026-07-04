@@ -56,9 +56,11 @@ def start_server(port: int = _PORT) -> bool:
     if _server_ok:
         return True
     _serve_dir = audio_dir()
-    handler = functools.partial(
-        http.server.SimpleHTTPRequestHandler, directory=str(_serve_dir))
-    handler.log_message = lambda *a, **k: None  # quiet
+    class _Handler(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, fmt, *args):  # noqa: N802
+            logger.info("audio %s %s", self.client_address[0], fmt % args)
+
+    handler = functools.partial(_Handler, directory=str(_serve_dir))
     try:
         srv = http.server.ThreadingHTTPServer(("0.0.0.0", port), handler)
     except OSError as e:
