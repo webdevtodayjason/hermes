@@ -160,6 +160,8 @@ def _on_pre_llm(platform="", session_id="", **kw):
     with _lock:
         _turns.add(str(session_id or "?"))
     _set_msg(f"thinking… ({platform})" if platform else "thinking…")
+    if _link is not None:
+        logger.info("push: thinking platform=%s connected=%s", platform, _link.connected)
     _push()
 
 
@@ -183,6 +185,9 @@ def _on_post_llm(assistant_response="", platform="", session_id="", **kw):
         with _lock:
             _entries.appendleft(f"{stamp} a: {_actions.compact(text, 70)}")
         _set_msg(text if not src else f"[{src}] {text}"[:140])
+        if _link is not None:
+            logger.info("push: reply platform=%s len=%d connected=%s",
+                        src, len(text), _link.connected)
         # event=message makes the portrait blink at a fresh reply
         _push({"type": "event", "event": "message", "role": "assistant", "msg": text})
         return
