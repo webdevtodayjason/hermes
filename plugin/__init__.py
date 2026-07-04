@@ -41,6 +41,8 @@ from pathlib import Path
 
 from . import actions as _actions
 from . import feeds as _feeds
+from . import loom_bell as _loom
+from . import ritual as _ritual
 from . import voice as _voice
 from .serial_link import SerialLink
 
@@ -49,6 +51,9 @@ logger = logging.getLogger("familiar")
 _started = {"at": time.time()}   # gateway (module load) time, for the vitals page
 _voice_enabled = True            # familiar_actions.json {"voice":{"enabled":false}} to kill
 _voice_port = 8765
+_loom_cfg: dict = {}             # familiar_actions.json {"loom":{"enabled":true,"board":...}}
+_ritual_cfg: dict = {}           # familiar_actions.json {"ritual":{"enabled":true,"time":"18:30"}}
+_ctx: dict = {}                  # {"ctx": PluginContext} — for ctx.llm in the ritual
 _pages = {"at": 0.0}
 _PAGES_REFRESH_SECS = 60.0
 
@@ -145,7 +150,8 @@ def _refresh_stats() -> None:
 
 
 def _maybe_push_pages() -> None:
-    """Refresh the device's cron/vitals pages at most once a minute."""
+    """Once-a-minute housekeeping on the link thread: device pages, the Loom
+    bell, and the evening ritual (which offloads to its own thread)."""
     if _link is None:
         return
     now = time.time()
@@ -157,6 +163,59 @@ def _maybe_push_pages() -> None:
         _link.send(_feeds.vitals_page(_started["at"], _stats))
     except Exception:
         logger.exception("familiar page feed failed")
+    try:
+        _loom_tick()
+    except Exception:
+        logger.exception("familiar loom bell failed")
+    try:
+        _ritual_tick()
+    except Exception:
+        logger.exception("familiar ritual failed")
+
+
+def _loom_tick() -> None:
+    if not _loom_cfg.get("enabled", True):
+        return
+    events = _loom.check(_loom_cfg.get("board"))
+    if not events:
+        return
+    stamp = datetime.now().strftime("%H:%M")
+    with _lock:
+        for ev in events[:6]:
+            _entries.appendleft(f"{stamp} L: {_actions.compact(ev['text'], 70)}")
+    loud = [ev for ev in events if ev["speak"]]
+    if len(events) > 3 and not loud:
+        _push({"type": "notify", "msg": f"Loom: {len(events)} new events", "sound": "tap"})
+        return
+    for ev in loud[:2]:
+        _push({"type": "notify", "msg": _actions.compact(ev["text"], 120), "sound": "alert"})
+        _say_async(ev["text"])
+    if not loud:
+        _push()
+
+
+def _ritual_tick() -> None:
+    if not _ritual_cfg.get("enabled", True):
+        return
+    now = datetime.now()
+    if not _ritual.due(now, _ritual_cfg.get("time", _ritual.DEFAULT_TIME)):
+        return
+    _ritual.mark_done(now)   # mark first — a failed compose must not retry-loop
+
+    def _work():
+        _refresh_stats()
+        material = _ritual.gather(now, _stats, _loom_cfg.get("board") or _loom.DEFAULT_BOARD)
+        llm = getattr(_ctx["ctx"], "llm", None) if _ctx.get("ctx") else None
+        digest = _ritual.compose(material, llm=llm)
+        logger.info("evening digest (%d chars): %s", len(digest), digest[:160])
+        _push({"type": "notify", "msg": "Evening digest — listen", "sound": "none"})
+        with _lock:
+            _entries.appendleft(f"{now.strftime('%H:%M')} *: evening digest")
+        url = _say_url(digest)
+        if url and _link is not None:
+            _link.send({"type": "say", "url": url})
+
+    threading.Thread(target=_work, name="familiar-ritual", daemon=True).start()
 
 
 def _payload() -> dict:
@@ -436,6 +495,9 @@ def register(ctx) -> None:
     vc = cfg.get("voice") or {}
     _voice_enabled = bool(vc.get("enabled", True))
     _voice_port = int(vc.get("port", 8765))
+    _loom_cfg.update(cfg.get("loom") or {})
+    _ritual_cfg.update(cfg.get("ritual") or {})
+    _ctx["ctx"] = ctx
 
     if _is_gateway_process():
         serial_cfg = cfg.get("serial") or {}
