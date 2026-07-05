@@ -1245,6 +1245,10 @@ static void applyJsonLine(const String &line) {
 
   if (doc["cmd"] == "ping") {
     sendLine("{\"ack\":\"ping\",\"ok\":true}");
+    // A ping means a fresh host connection (the plugin probes on connect and
+    // the probe eats our boot hello). Re-announce so the host re-pushes the
+    // deck + host config immediately instead of waiting for the 60s tick.
+    sendLine("{\"hello\":\"hermes-buddy\",\"transport\":\"reconnect\"}");
     return;
   }
   if (doc["cmd"] == "clear") {
@@ -1470,6 +1474,11 @@ void setup() {
   pinMode(PWR_HOLD, OUTPUT);
   digitalWrite(PWR_HOLD, HIGH);
 
+  // Default USB-CDC RX buffer is 256 bytes — too small for a burst of page
+  // frames (the 360-byte deck frame overflows it while the screen repaints,
+  // truncating the frame into a JSON parse error). Bigger buffer = whole
+  // frames survive even during a slow redraw.
+  Serial.setRxBufferSize(2048);
   Serial.begin(115200);
   delay(100);
   pinMode(BOOT_BTN, INPUT_PULLUP);
