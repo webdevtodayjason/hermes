@@ -57,8 +57,11 @@ final class FamiliarModel: ObservableObject {
         let d = UserDefaults.standard
         let host = d.string(forKey: "host") ?? Self.defaultHost
         let port = d.object(forKey: "port") != nil ? d.integer(forKey: "port") : Self.defaultPort
+        // trim — clipboard sync loves to smuggle in a newline
+        let token = (d.string(forKey: "token") ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         client.connect(host: host, port: port == 0 ? Self.defaultPort : port,
-                       token: d.string(forKey: "token") ?? "")
+                       token: token)
     }
 
     func apply(_ f: [String: Any]) {

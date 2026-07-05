@@ -13,13 +13,19 @@ final class FamiliarClient: NSObject, URLSessionWebSocketDelegate {
     private var task: URLSessionWebSocketTask?
     private var url: URL?
     private var token = ""
-    private var generation = 0          // invalidates stale callbacks after reconfigure
+    // bumped on every open; a receive loop or queued retry from an older
+    // attempt sees the mismatch and dies. Exactly one live loop per socket —
+    // URLSessionWebSocketTask allows only ONE pending receive, so a second
+    // loop on the same task errors the whole connection.
+    private var attempt = 0
     private var lastRx = Date()
     private var watchdog: Timer?
 
     override init() {
         super.init()
-        session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        // main-queue delegate: all client state is touched from one queue
+        session = URLSession(configuration: .default, delegate: self,
+                             delegateQueue: OperationQueue.main)
     }
 
     func connect(host: String, port: Int, token: String) {
@@ -27,16 +33,14 @@ final class FamiliarClient: NSObject, URLSessionWebSocketDelegate {
         guard !trimmed.isEmpty, let u = URL(string: "ws://\(trimmed):\(port)") else { return }
         url = u
         self.token = token
-        generation += 1
-        task?.cancel(with: .goingAway, reason: nil)
-        open(generation)
         DispatchQueue.main.async { [self] in
+            open()
             watchdog?.invalidate()
             // server heartbeats every ~2s; silence means the link is dead
             watchdog = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
                 guard let self, let t = self.task else { return }
                 if Date().timeIntervalSince(self.lastRx) > 12 {
-                    t.cancel(with: .goingAway, reason: nil)   // receive() fails -> retry path
+                    t.cancel(with: .goingAway, reason: nil)   // receive fails -> retry path
                 }
             }
         }
@@ -48,36 +52,39 @@ final class FamiliarClient: NSObject, URLSessionWebSocketDelegate {
         task.send(.string(text)) { _ in }
     }
 
-    private func open(_ gen: Int) {
+    private func open() {
         guard let url else { return }
         status(.connecting)
+        attempt += 1
+        lastRx = Date()
+        task?.cancel(with: .goingAway, reason: nil)
         let t = session.webSocketTask(with: url)
         task = t
         t.resume()
-        receive(gen)
+        receive(t, attempt)
     }
 
-    private func retry(_ gen: Int) {
-        guard gen == generation else { return }
+    private func scheduleRetry() {
         status(.offline)
+        let a = attempt
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            guard let self, gen == self.generation else { return }
-            self.open(gen)
+            guard let self, a == self.attempt else { return }  // superseded meanwhile
+            self.open()
         }
     }
 
-    private func receive(_ gen: Int) {
-        task?.receive { [weak self] result in
-            guard let self, gen == self.generation else { return }
+    private func receive(_ t: URLSessionWebSocketTask, _ a: Int) {
+        t.receive { [weak self] result in
+            guard let self, a == self.attempt else { return }  // stale loop dies here
             switch result {
             case .failure:
-                self.retry(gen)
+                self.scheduleRetry()
             case .success(let message):
                 self.lastRx = Date()
                 if case .string(let text) = message { self.handle(text) }
                 if case .data(let data) = message,
                    let text = String(data: data, encoding: .utf8) { self.handle(text) }
-                self.receive(gen)
+                self.receive(t, a)
             }
         }
     }
@@ -103,6 +110,9 @@ final class FamiliarClient: NSObject, URLSessionWebSocketDelegate {
     // MARK: URLSessionWebSocketDelegate
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didOpenWithProtocol protocol: String?) {
-        send(["type": "auth", "token": token])
+        // auth on the task that opened — not self.task, which may be newer
+        guard let data = try? JSONSerialization.data(withJSONObject: ["type": "auth", "token": token]),
+              let text = String(data: data, encoding: .utf8) else { return }
+        webSocketTask.send(.string(text)) { _ in }
     }
 }
