@@ -159,17 +159,32 @@ static uint32_t forcedUntilMs = 0;
 static uint8_t localMood = 0;
 static uint32_t nextBlinkMs = 7000;
 
+// Pip-Boy landscape UI: the device sits rotated 90° CCW (USB to the side),
+// content rotates 90° CW to compensate. Full-screen tabbed pages, swipe or
+// tap the tab bar to move. Logical canvas: 320x240.
 enum UiPage : uint8_t {
-  PAGE_STATUS = 0,
-  PAGE_RECENT = 1,
-  PAGE_ACTIONS = 2,
-  PAGE_DEVICE = 3,
-  PAGE_CRON = 4,
-  PAGE_VITALS = 5,
+  PAGE_FACE = 0,
+  PAGE_MSGS = 1,
+  PAGE_OPS  = 2,
+  PAGE_CRON = 3,
+  PAGE_NET  = 4,
+  PAGE_DEV  = 5,
   PAGE_COUNT = 6,
 };
+static const char* const PAGE_TABS[PAGE_COUNT] = {"FACE", "MSGS", "OPS", "CRON", "NET", "DEV"};
 
-static UiPage uiPage = PAGE_STATUS;
+static constexpr int16_t LW = 320;        // logical landscape width
+static constexpr int16_t LH = 240;        // logical landscape height
+static constexpr int16_t TAB_H = 18;      // tab bar height
+static constexpr int16_t FACE_ROW0 = 10;  // first portrait-art row shown on FACE
+
+// Rotation index for gfx->setRotation(). 1 = content 90° CW (device rotated
+// CCW); if the screen comes up upside down, set {"display":{"rotation":3}}
+// over serial config — no reflash. 0 restores the legacy portrait UI's
+// orientation (the UI itself stays landscape).
+static uint8_t uiRot = 1;
+
+static UiPage uiPage = PAGE_FACE;
 static String serialLine;
 static String bleLine;
 
@@ -302,22 +317,23 @@ static int frameForState(bool live) {
   return 1;                     // idle
 }
 
-static void drawGeneratedFrame(int idx) {
+static void drawGeneratedFrame(int idx, int16_t yDst = 0, int rowStart = 0, int rowCount = HERMES_FRAME_H) {
   int count = sizeof(HERMES_FRAMES) / sizeof(HERMES_FRAMES[0]);
   if (idx < 0 || idx >= count) idx = 1;
   const uint8_t* data = HERMES_FRAMES[idx].data;
   uint16_t line[HERMES_FRAME_W];
+  int rowEnd = min(rowStart + rowCount, (int)HERMES_FRAME_H);
   // LovyanGFX text/fill primitives send RGB565 correctly, but pushImage() uses
   // the raw 16-bit buffer byte order. Without swapBytes, green frame pixels show
   // up as red/orange on this ESP32-S3/ST7789 path.
   gfx->setSwapBytes(true);
-  for (int y = 0; y < HERMES_FRAME_H; ++y) {
+  for (int y = rowStart; y < rowEnd; ++y) {
     for (int x = 0; x < HERMES_FRAME_W; x += 2) {
       uint8_t b = pgm_read_byte(data + y * (HERMES_FRAME_W / 2) + (x / 2));
       line[x] = HERMES_TERMINAL_PALETTE[(b >> 4) & 0x0F];
       line[x + 1] = HERMES_TERMINAL_PALETTE[b & 0x0F];
     }
-    gfx->pushImage(0, y, HERMES_FRAME_W, 1, line);
+    gfx->pushImage(0, yDst + (y - rowStart), HERMES_FRAME_W, 1, line);
   }
   gfx->setSwapBytes(false);
 }
@@ -362,15 +378,16 @@ static uint32_t stateFrameMs(const char* group) {
 static int frameForSDGroup(const char* group, int count, uint32_t ms) {
   if (forcedUntilMs && !strcmp(group, forcedGroup)) {
     uint32_t e = millis() - forcedStartMs;
-    if (!strcmp(group, "wink")) return e < 2000 ? 0 : 1;   // wink, hold, un-wink
-    if (!strcmp(group, "smile")) return e < 3000 ? 0 : 1;  // smile, hold, neutral
-    if (!strcmp(group, "happy")) return e < 3000 ? min(1, count - 1) : (count - 1);
+    // release frames sized to the (snappy) triggerNamedMood holds
+    if (!strcmp(group, "wink")) return e < 550 ? 0 : 1;    // wink, un-wink
+    if (!strcmp(group, "smile")) return e < 1100 ? 0 : 1;  // smile, neutral
+    if (!strcmp(group, "happy")) return e < 1200 ? min(1, count - 1) : (count - 1);
     if (!strcmp(group, "blink")) return e < 120 ? 0 : (e < 260 ? 1 : min(2, count - 1));
   }
   return count > 1 ? ((millis() / ms) % count) : 0;
 }
 
-static bool drawSDRaw4(const char* group) {
+static bool drawSDRaw4(const char* group, int16_t yDst = 0, int rowStart = 0, int rowCount = HERMES_FRAME_H) {
   if (!sdReady) return false;
   int count = stateFrameCount(group);
   uint32_t ms = stateFrameMs(group);
@@ -384,8 +401,10 @@ static bool drawSDRaw4(const char* group) {
 
   uint8_t packed[HERMES_FRAME_W / 2];
   uint16_t line[HERMES_FRAME_W];
+  int rowEnd = min(rowStart + rowCount, (int)HERMES_FRAME_H);
+  if (rowStart > 0) f.seek((uint32_t)rowStart * (HERMES_FRAME_W / 2));
   gfx->setSwapBytes(true);
-  for (int y = 0; y < HERMES_FRAME_H; ++y) {
+  for (int y = rowStart; y < rowEnd; ++y) {
     int got = f.read(packed, sizeof(packed));
     if (got != (int)sizeof(packed)) { gfx->setSwapBytes(false); f.close(); return false; }
     for (int x = 0; x < HERMES_FRAME_W; x += 2) {
@@ -393,7 +412,7 @@ static bool drawSDRaw4(const char* group) {
       line[x] = HERMES_TERMINAL_PALETTE[(b >> 4) & 0x0F];
       line[x + 1] = HERMES_TERMINAL_PALETTE[b & 0x0F];
     }
-    gfx->pushImage(0, y, HERMES_FRAME_W, 1, line);
+    gfx->pushImage(0, yDst + (y - rowStart), HERMES_FRAME_W, 1, line);
   }
   gfx->setSwapBytes(false);
   f.close();
@@ -525,8 +544,14 @@ static bool readManualTouch(uint16_t* x, uint16_t* y) {
   cstWrite(0xD005, &clear, 1);
   uint16_t rawX = ((uint16_t)buf[2] << 4) + ((buf[4] & 0xF0) >> 4);
   uint16_t rawY = ((uint16_t)buf[3] << 4) + (buf[4] & 0x0F);
-  *x = rawX;
-  *y = rawY;
+  // The CST328 reports native portrait coords (0..239, 0..319); map into the
+  // rotated logical canvas so the rest of the UI thinks in landscape.
+  switch (uiRot) {
+    case 1: *x = rawY;          *y = (W - 1) - rawX; break;
+    case 3: *x = (H - 1) - rawY; *y = rawX;          break;
+    case 2: *x = (W - 1) - rawX; *y = (H - 1) - rawY; break;
+    default: *x = rawX; *y = rawY; break;
+  }
   return true;
 }
 
@@ -811,6 +836,23 @@ static void setupHttpServer() {
   httpServer.begin();
 }
 
+static void applyRotation(uint8_t r) {
+  uiRot = r & 3;
+  gfx->setRotation(uiRot);
+  st.dirty = true;
+}
+
+static void loadDisplayConfigFromSD() {
+  if (!sdReady || !SD_MMC.exists("/hermes-buddy/config.json")) return;
+  File f = SD_MMC.open("/hermes-buddy/config.json", FILE_READ);
+  if (!f) return;
+  StaticJsonDocument<512> doc;
+  DeserializationError err = deserializeJson(doc, f);
+  f.close();
+  if (err) return;
+  if (!doc["display"]["rotation"].isNull()) applyRotation((uint8_t)(doc["display"]["rotation"] | 1));
+}
+
 static void initWiFiFromSD() {
   if (!sdReady || !SD_MMC.exists("/hermes-buddy/config.json")) {
     wifiStatus = "WiFi:no-config";
@@ -842,6 +884,34 @@ static void initWiFiFromSD() {
   }
 }
 
+static void drawTabBar(uint16_t mood) {
+  gfx->fillRect(0, 0, LW, TAB_H, BG);
+  gfx->setTextSize(1);
+  const int16_t tabW = LW / PAGE_COUNT;   // 53px
+  for (int i = 0; i < PAGE_COUNT; ++i) {
+    bool active = (i == (int)uiPage);
+    bool alert = (i == PAGE_OPS && st.waiting > 0 && ((millis() / 400) & 1));
+    uint16_t c = alert ? RED : (active ? mood : DIM);
+    gfx->setTextColor(c, BG);
+    int16_t x = i * tabW + (tabW - (int16_t)strlen(PAGE_TABS[i]) * 6) / 2;
+    gfx->setCursor(x, 5);
+    gfx->print(PAGE_TABS[i]);
+    if (active) gfx->drawFastHLine(i * tabW + 6, TAB_H - 2, tabW - 12, mood);
+  }
+  gfx->drawFastHLine(0, TAB_H - 1, LW, DIM);
+}
+
+static void drawToastStrip() {
+  const int16_t y0 = LH - 50;
+  gfx->fillRect(0, y0, LW, 50, BG);
+  gfx->drawFastHLine(0, y0, LW, GOLD);
+  gfx->setTextSize(1);
+  gfx->setTextColor(GOLD, BG);
+  gfx->setCursor(8, y0 + 6);
+  gfx->print("> HERMES:");
+  drawWrapped(toastText, 8, y0 + 20, 50, 2, INK);
+}
+
 static void redraw() {
   st.dirty = false;
   bool live = st.connected && (millis() - st.lastSeenMs < 30000);
@@ -850,100 +920,126 @@ static void redraw() {
   uint16_t mood = (!strcmp(group, "sleep")) ? DIM
                 : (st.waiting > 0 ? (((millis() / 400) & 1) ? RED : ORANGE)
                 : (st.running > 0 ? ORANGE : GREEN));
+  const char* label = st.waiting > 0 ? "WAIT" : (st.running > 0 ? "THINK" : (!strcmp(group, "sleep") ? "SLEEP" : "AWAKE"));
+  const int16_t CY = TAB_H;              // content top
+  const int16_t CH = LH - TAB_H;         // content height (222)
 
-  if (!drawSDRaw4(group)) drawGeneratedFrame(frameForState(live));
+  drawTabBar(mood);
 
-  // Terminal overlay: keep live text out of the portrait/top-left area because
-  // some source frames already contain decorative terminal text. Reserve a
-  // solid bottom console band so readable UI never becomes text-over-text.
-  gfx->fillRect(0, CONSOLE_Y, W, H - CONSOLE_Y, BG);
-  gfx->drawFastHLine(0, CONSOLE_Y, W, mood);
-  gfx->drawFastHLine(0, CONSOLE_Y + 2, W, DIM);
-
-  // Toast takes over the band on ANY page (never over a pending approval).
-  if (toastUntilMs && millis() < toastUntilMs && !(st.action.active || st.waiting > 0)) {
+  if (uiPage == PAGE_FACE) {
+    // Portrait art (240 wide) fills the left; 80px Pip-Boy vitals column right.
+    if (!drawSDRaw4(group, CY, FACE_ROW0, CH))
+      drawGeneratedFrame(frameForState(live), CY, FACE_ROW0, CH);
+    const int16_t vx = HERMES_FRAME_W + 6;
+    gfx->fillRect(HERMES_FRAME_W, CY, LW - HERMES_FRAME_W, CH, BG);
+    gfx->drawFastVLine(HERMES_FRAME_W + 2, CY + 4, CH - 8, DIM);
     gfx->setTextSize(1);
-    gfx->setTextColor(GOLD, BG);
-    gfx->setCursor(10, 260);
-    gfx->print("> HERMES:");
-    drawWrapped(toastText, 10, 276, 34, 2, INK);
-    return;
+    gfx->setTextColor(mood, BG);
+    gfx->setCursor(vx, CY + 8);   gfx->print(label);
+    gfx->setTextColor(INK, BG);
+    gfx->setCursor(vx, CY + 28);  gfx->printf("S %d", st.total);
+    gfx->setCursor(vx, CY + 42);  gfx->printf("R %d", st.running);
+    gfx->setCursor(vx, CY + 56);  gfx->printf("W %d", st.waiting);
+    gfx->setTextColor(DIM, BG);
+    gfx->setCursor(vx, CY + 78);  gfx->print("TOK");
+    gfx->setTextColor(INK, BG);
+    gfx->setCursor(vx, CY + 90);
+    if (st.tokensToday >= 1000) gfx->printf("%luk", (unsigned long)(st.tokensToday / 1000));
+    else gfx->printf("%lu", (unsigned long)st.tokensToday);
+    gfx->setTextColor(DIM, BG);
+    gfx->setCursor(vx, CY + 110); gfx->print("JOB");
+    gfx->setTextColor(INK, BG);
+    String js = st.jobState; if (js.length() > 12) js = js.substring(0, 12);
+    gfx->setCursor(vx, CY + 122); gfx->print(js);
+    gfx->setTextColor(live ? GREEN : DIM, BG);
+    gfx->setCursor(vx, CY + 150); gfx->print(live ? "USB ok" : "USB --");
+    gfx->setTextColor(wifiReady ? GREEN : DIM, BG);
+    gfx->setCursor(vx, CY + 164); gfx->print(wifiReady ? "NET ok" : "NET --");
+    gfx->setTextColor(bleConnected ? GREEN : DIM, BG);
+    gfx->setCursor(vx, CY + 178); gfx->print(bleConnected ? "BLE ok" : "BLE ad");
+  } else {
+    gfx->fillRect(0, CY, LW, CH, BG);
+    gfx->setTextSize(1);
   }
 
-  gfx->setTextSize(1);
-  gfx->setTextColor(mood, BG);
-  const char* label = st.waiting > 0 ? "WAIT" : (st.running > 0 ? "THINK" : (!strcmp(group, "sleep") ? "SLEEP" : "AWAKE"));
-
-  if (uiPage == PAGE_STATUS) {
-    gfx->setCursor(10, 260);
-    gfx->printf("> FAMILIAR:%s USB:%s BLE:%s", label, live ? "ON" : "--", bleConnected ? "LINK" : "ADV");
-    gfx->setCursor(10, 276);
-    gfx->printf("> S:%d R:%d W:%d TOK:%lu", st.total, st.running, st.waiting, (unsigned long)st.tokensToday);
-    gfx->setCursor(10, 292);
-    if (millis() - st.lastTouchMs < 2500) {
-      gfx->printf("> TOUCH:%03u,%03u", st.touchX, st.touchY);
-    } else {
-      String m = st.msg;
-      if (sdReady && !live) m = sdStatus + " " + touchStatus;
-      if (!sdReady && sdStatus != "SD:checking") m = sdStatus + " " + touchStatus;
-      if (m.length() > 32) m = m.substring(0, 32);
-      gfx->print("> ");
-      gfx->print(m);
+  if (uiPage == PAGE_MSGS) {
+    gfx->setTextColor(DIM, BG);
+    gfx->setCursor(8, CY + 6);
+    gfx->print("> RECENT TRAFFIC (u you / a hermes / k kanban / L loom)");
+    int16_t y = CY + 22;
+    for (int i = 0; i < 5; ++i) {
+      if (i >= st.entryCount) break;
+      drawWrapped(st.entries[i], 8, y, 50, 2, i == 0 ? INK : GREEN);
+      y += (st.entries[i].length() > 50 ? 26 : 14);
+      gfx->drawFastHLine(8, y - 4, LW - 16, PANEL);
+      if (y > LH - 24) break;
     }
-  } else if (uiPage == PAGE_RECENT) {
-    gfx->setCursor(10, 260);
-    gfx->print("> RECENT HERMES");
-    gfx->setCursor(10, 276);
-    String a = st.entryCount > 0 ? st.entries[0] : "no recent messages";
-    if (a.length() > 34) a = a.substring(0, 34);
-    gfx->print(a);
-    gfx->setCursor(10, 292);
-    String b = st.entryCount > 1 ? st.entries[1] : "tap band for device page";
-    if (b.length() > 34) b = b.substring(0, 34);
-    gfx->print(b);
-  } else if (uiPage == PAGE_ACTIONS) {
-    gfx->setCursor(10, 260);
-    gfx->print("> ACTIONS");
-    gfx->setCursor(10, 276);
-    String j = st.action.active ? st.action.text : (st.jobState + ": " + st.jobLabel);
-    if (j.length() > 34) j = j.substring(0, 34);
-    gfx->print(j);
-    gfx->setCursor(10, 292);
+    if (st.entryCount == 0) {
+      gfx->setTextColor(DIM, BG);
+      gfx->setCursor(8, CY + 30);
+      gfx->print("no messages yet");
+    }
+  } else if (uiPage == PAGE_OPS) {
     if (st.action.active || st.waiting > 0) {
-      gfx->drawFastVLine(120, 284, 30, DIM);
-      gfx->print(" TAP: ALLOW        DENY");
+      gfx->setTextColor(mood, BG);
+      gfx->setCursor(8, CY + 6);
+      gfx->print("> APPROVAL REQUIRED");
+      drawWrapped(st.action.active ? st.action.text : st.msg, 8, CY + 24, 50, 3, INK);
+      const int16_t by = CY + 80, bh = 100;
+      gfx->drawRoundRect(12, by, 140, bh, 8, GREEN);
+      gfx->setTextSize(2);
+      gfx->setTextColor(GREEN, BG);
+      gfx->setCursor(12 + 40, by + bh / 2 - 8); gfx->print("ALLOW");
+      gfx->drawRoundRect(168, by, 140, bh, 8, RED);
+      gfx->setTextColor(RED, BG);
+      gfx->setCursor(168 + 46, by + bh / 2 - 8); gfx->print("DENY");
+      gfx->setTextSize(1);
     } else {
-      gfx->drawFastVLine(80, 284, 30, DIM);
-      gfx->drawFastVLine(160, 284, 30, DIM);
-      gfx->print(" START    PAUSE    CANCEL");
+      gfx->setTextColor(INK, BG);
+      gfx->setCursor(8, CY + 6);
+      gfx->print("> OPS");
+      gfx->setTextColor(DIM, BG);
+      gfx->setCursor(8, CY + 22);
+      String j = st.jobState + ": " + st.jobLabel;
+      if (j.length() > 50) j = j.substring(0, 50);
+      gfx->print(j);
+      const int16_t by = CY + 60, bh = 90, bw = 96;
+      const char* labels[3] = {"START", "PAUSE", "CANCEL"};
+      for (int i = 0; i < 3; ++i) {
+        int16_t bx = 8 + i * (bw + 8);
+        gfx->drawRoundRect(bx, by, bw, bh, 8, i == 0 ? GREEN : (i == 1 ? GOLD : RED));
+        gfx->setTextColor(i == 0 ? GREEN : (i == 1 ? GOLD : RED), BG);
+        gfx->setCursor(bx + (bw - (int16_t)strlen(labels[i]) * 6) / 2, by + bh / 2 - 4);
+        gfx->print(labels[i]);
+      }
     }
-  } else if (uiPage == PAGE_CRON || uiPage == PAGE_VITALS) {
+  } else if (uiPage == PAGE_CRON || uiPage == PAGE_NET) {
     HostPage &hp = hostPages[uiPage == PAGE_CRON ? 0 : 1];
-    gfx->setCursor(10, 260);
+    gfx->setTextColor(INK, BG);
+    gfx->setCursor(8, CY + 6);
     gfx->print("> ");
     gfx->print(hp.set ? hp.title : String(uiPage == PAGE_CRON ? "CRON JOBS" : "GATEWAY"));
-    gfx->setCursor(10, 276);
-    String a = hp.set ? hp.l1 : String("no data from host yet");
-    if (a.length() > 34) a = a.substring(0, 34);
-    gfx->print(a);
-    gfx->setCursor(10, 292);
-    String b = hp.l2;
-    if (b.length() > 34) b = b.substring(0, 34);
-    gfx->print(b);
-  } else {
-    gfx->setCursor(10, 260);
-    gfx->print("> DEVICE");
-    gfx->setCursor(10, 276);
-    String a = sdStatus + " " + touchStatus + " " + batteryLine();
-    if (a.length() > 34) a = a.substring(0, 34);
-    gfx->print("> ");
-    gfx->print(a);
-    gfx->setCursor(10, 292);
-    String b = motionLine() + " " + rtcClock;
-    if (!imuReady) b = wifiStatus + " " + rtcClock;
-    if (b.length() > 34) b = b.substring(0, 34);
-    gfx->print("> ");
-    gfx->print(b);
+    gfx->drawFastHLine(8, CY + 18, LW - 16, DIM);
+    gfx->setTextColor(GREEN, BG);
+    drawWrapped(hp.set ? hp.l1 : String("no data from host yet"), 8, CY + 28, 50, 2, GREEN);
+    drawWrapped(hp.l2, 8, CY + 58, 50, 2, GREEN);
+  } else if (uiPage == PAGE_DEV) {
+    gfx->setTextColor(INK, BG);
+    gfx->setCursor(8, CY + 6);   gfx->print("> DEVICE");
+    gfx->drawFastHLine(8, CY + 18, LW - 16, DIM);
+    gfx->setTextColor(GREEN, BG);
+    gfx->setCursor(8, CY + 28);  gfx->print(sdStatus + "  " + touchStatus);
+    gfx->setCursor(8, CY + 44);  gfx->print(batteryLine() + "  " + rtcClock);
+    gfx->setCursor(8, CY + 60);  gfx->print(wifiStatus);
+    gfx->setCursor(8, CY + 76);  gfx->print(motionLine());
+    gfx->setCursor(8, CY + 92);  gfx->printf("rot:%u  heap:%u", uiRot, (unsigned)ESP.getFreeHeap());
+    gfx->setTextColor(DIM, BG);
+    gfx->setCursor(8, CY + 116); gfx->print("swipe L/R or tap tabs to navigate");
+  }
+
+  // Toast strip on any page (never over a pending approval).
+  if (toastUntilMs && millis() < toastUntilMs && !(st.action.active || st.waiting > 0)) {
+    drawToastStrip();
   }
 }
 
@@ -959,7 +1055,7 @@ static void sendLine(const String &line) {
 
 static void resetBuddyState() {
   st = BuddyState();
-  uiPage = PAGE_STATUS;
+  uiPage = PAGE_FACE;
   forcedGroup[0] = 0;
   forcedStartMs = 0;
   forcedUntilMs = 0;
@@ -994,35 +1090,38 @@ static void goPage(int delta) {
 static void handleTap(uint16_t tx, uint16_t ty) {
   sendLine(String("{\"cmd\":\"touch\",\"x\":") + tx + ",\"y\":" + ty + "}");
 
-  if (ty >= CONSOLE_Y) {
-    if (uiPage == PAGE_ACTIONS) {
-      if (st.action.active || st.waiting > 0) {
-        const char* decision = tx < 120 ? "once" : "deny";
-        sendPermissionDecision(decision);
-        st.msg = String("decision: ") + decision;
-      } else {
-        const char* action = tx < 80 ? "start" : (tx < 160 ? "pause" : "cancel");
-        sendLine(String("{\"cmd\":\"action\",\"action\":\"") + action + "\"}");
-        st.msg = String("action: ") + action;
-      }
-    } else if (st.waiting > 0) {
-      uiPage = PAGE_ACTIONS;
-      st.msg = "tap allow or deny";
-      triggerNamedMood("touch", "blink");
+  if (toastUntilMs) { toastUntilMs = 0; st.dirty = true; }  // any tap dismisses a banner
+
+  // Tab bar: direct page select.
+  if (ty < TAB_H) {
+    int tab = tx / (LW / PAGE_COUNT);
+    if (tab >= 0 && tab < PAGE_COUNT) {
+      uiPage = (UiPage)tab;
+      st.msg = String("tab: ") + PAGE_TABS[tab];
+    }
+    st.dirty = true;
+    return;
+  }
+
+  if (uiPage == PAGE_OPS && ty > TAB_H + 40) {
+    if (st.action.active || st.waiting > 0) {
+      const char* decision = tx < 160 ? "once" : "deny";
+      sendPermissionDecision(decision);
+      st.msg = String("decision: ") + decision;
     } else {
-      // Bottom-band taps advance one page for users who prefer tapping.
-      // Full-screen left/right swipes are handled on release in loop().
-      goPage(1);
+      const char* action = tx < 110 ? "start" : (tx < 214 ? "pause" : "cancel");
+      sendLine(String("{\"cmd\":\"action\",\"action\":\"") + action + "\"}");
+      st.msg = String("action: ") + action;
     }
     st.dirty = true;
     return;
   }
 
   if (st.waiting > 0) {
-    uiPage = PAGE_ACTIONS;
+    uiPage = PAGE_OPS;
     st.msg = "tap allow or deny";
     triggerNamedMood("touch", "blink");
-  } else {
+  } else if (uiPage == PAGE_FACE && tx < HERMES_FRAME_W) {
     triggerLocalMood("touch");
   }
   st.dirty = true;
@@ -1129,6 +1228,7 @@ static void applyJsonLine(const String &line) {
         if (rf) { deserializeJson(cfg, rf); rf.close(); }
       }
       if (!doc["wifi"].isNull()) cfg["wifi"] = doc["wifi"];
+      if (!doc["display"].isNull()) cfg["display"] = doc["display"];
       File wf = SD_MMC.open("/hermes-buddy/config.json", FILE_WRITE);
       if (wf) {
         serializeJson(cfg, wf);
@@ -1140,6 +1240,7 @@ static void applyJsonLine(const String &line) {
       }
     }
     sendLine(String("{\"ack\":\"config\",\"ok\":") + (ok ? "true" : "false") + ",\"detail\":\"" + why + "\"}");
+    if (!doc["display"]["rotation"].isNull()) applyRotation((uint8_t)(doc["display"]["rotation"] | 1));
     if (ok && !doc["wifi"].isNull()) initWiFiFromSD();
     return;
   }
@@ -1161,7 +1262,7 @@ static void applyJsonLine(const String &line) {
       st.action.choices[st.action.choiceCount++] = "once";
       st.action.choices[st.action.choiceCount++] = "deny";
     }
-    uiPage = PAGE_ACTIONS;
+    uiPage = PAGE_OPS;
     st.msg = st.action.text;
     triggerNamedMood("host", "blink", false, false);
     st.dirty = true;
@@ -1243,7 +1344,7 @@ void setup() {
   if (!gfx->begin()) {
     Serial.println("display init failed");
   }
-  gfx->setRotation(0);
+  gfx->setRotation(uiRot);   // landscape default; SD config may override below
   // Calibration photo PAGE 5/8: LCD inversion ON + normal RGB565 gives
   // black background and green terminal bars on this ST7789 panel.
   gfx->invertDisplay(true);
@@ -1255,6 +1356,7 @@ void setup() {
   initMotionAndRtc();
   initAudio();
   initSDCard();
+  loadDisplayConfigFromSD();
   initWiFiFromSD();
   setupBle();
   randomSeed((uint32_t)esp_random());
@@ -1278,7 +1380,7 @@ void loop() {
   static bool lastBtn = true;
   bool btn = digitalRead(BOOT_BTN);
   if (lastBtn && !btn) {
-    if (uiPage == PAGE_ACTIONS) sendLine("{\"cmd\":\"action\",\"action\":\"start\"}");
+    if (uiPage == PAGE_OPS) sendLine("{\"cmd\":\"action\",\"action\":\"start\"}");
     else if (st.waiting > 0) sendPermissionDecision("once");
     triggerLocalMood("button");
     chirp("tap");
