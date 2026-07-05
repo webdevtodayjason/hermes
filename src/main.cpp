@@ -947,6 +947,31 @@ static void drawToastStrip() {
   drawWrapped(toastText, 8, y0 + 20, 50, 2, INK);
 }
 
+// Floating "working" pill: shown on ANY tab while a deck job runs, so a
+// 40s hermes chat doesn't look frozen. Vanishes when jobIndex clears (the
+// result lands in the same state frame that sets jobIndex back to -1).
+static void drawWorkingPill() {
+  const char* name = (jobIndex >= 0 && jobIndex < deckCount)
+                       ? deck[jobIndex].label.c_str() : "WORKING";
+  uint8_t dots = (millis() / 350) % 4;        // animated 0..3 dots
+  char buf[24];
+  snprintf(buf, sizeof(buf), "%s%s", name,
+           dots == 0 ? "" : (dots == 1 ? "." : (dots == 2 ? ".." : "...")));
+  int16_t w = 22 + (int16_t)strlen(name) * 6 + 20;   // spinner + label + dots room
+  int16_t x = (LW - w) / 2, y = TAB_H + 6;
+  gfx->fillRoundRect(x, y, w, 20, 6, PANEL);
+  gfx->drawRoundRect(x, y, w, 20, 6, GOLD);
+  // tiny spinner: a rotating bar char cycle
+  static const char* spin[4] = {"-", "\\", "|", "/"};
+  gfx->setTextSize(1);
+  gfx->setTextColor(GOLD, PANEL);
+  gfx->setCursor(x + 7, y + 6);
+  gfx->print(spin[(millis() / 120) % 4]);
+  gfx->setTextColor(INK, PANEL);
+  gfx->setCursor(x + 18, y + 6);
+  gfx->print(buf);
+}
+
 static void redraw() {
   st.dirty = false;
   bool live = st.connected && (millis() - st.lastSeenMs < 30000);
@@ -1109,6 +1134,11 @@ static void redraw() {
   // Toast strip on any page (never over a pending approval).
   if (toastUntilMs && millis() < toastUntilMs && !(st.action.active || st.waiting > 0)) {
     drawToastStrip();
+  }
+  // Floating "working" pill while a deck job runs (unless the OPS grid already
+  // shows it as a solid STOP button, or an approval is up).
+  if (jobIndex >= 0 && uiPage != PAGE_OPS && st.waiting == 0) {
+    drawWorkingPill();
   }
 }
 
