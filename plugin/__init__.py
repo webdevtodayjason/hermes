@@ -161,6 +161,7 @@ def _maybe_push_pages() -> None:
     try:
         _link.send(_feeds.cron_page())
         _link.send(_feeds.vitals_page(_started["at"], _stats))
+        _link.send(_feeds.fleet_page())
         _link.send(_actions.deck_frame(_jobs.actions))
     except Exception:
         logger.exception("familiar page feed failed")

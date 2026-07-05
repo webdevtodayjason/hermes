@@ -82,6 +82,33 @@ def test_ritual_gather_and_template_compose(board, monkeypatch):
     assert "7 Hermes sessions" in text and "Plug in a speaker" in text
 
 
+def test_fleet_page_reads_kanban(monkeypatch, tmp_path):
+    import sqlite3, time as _t
+    from plugin import feeds
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    con = sqlite3.connect(tmp_path / "kanban.db")
+    con.execute("CREATE TABLE tasks (id TEXT, title TEXT, assignee TEXT, status TEXT,"
+                " started_at INTEGER, completed_at INTEGER)")
+    now = _t.time()
+    con.executemany("INSERT INTO tasks VALUES (?,?,?,?,?,?)", [
+        ("t1", "fix the widget", "w1", "in_progress", now - 60, None),
+        ("t2", "old thing", "w2", "done", now - 7200, now - 3600),
+        ("t3", "waiting task", None, "queued", None, None),
+    ])
+    con.commit(); con.close()
+    page = feeds.fleet_page()
+    assert page["slot"] == 2
+    assert page["title"] == "FLEET: ACTIVE"
+    assert "run:1 queue:1 blocked:0 done24h:1" in page["lines"][0]
+    assert "w1: fix the widget" in page["lines"][1]
+
+
+def test_fleet_page_no_db(monkeypatch, tmp_path):
+    from plugin import feeds
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    assert feeds.fleet_page()["title"] == "FLEET: no kanban"
+
+
 def test_ritual_llm_compose_preferred():
     class FakeLlm:
         def complete(self, messages, **kw):

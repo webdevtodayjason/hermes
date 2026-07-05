@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import time
 from datetime import datetime
 from pathlib import Path
@@ -77,3 +78,43 @@ def vitals_page(started_at: float, stats: dict) -> dict:
         _fit(f"up {upstr}  {plat}"),
         _fit(f"S:{stats.get('total', 0)} tools:{stats.get('tools_today', 0)} tok:{tokstr}"),
     ]}
+
+
+def fleet_page() -> dict:
+    """Kanban worker fleet at a glance (slot 2). Degrades to 'idle' text."""
+    db = _home() / "kanban.db"
+    if not db.exists():
+        return {"type": "page", "slot": 2, "title": "FLEET: no kanban", "lines": []}
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=0.5)
+        try:
+            by_status = dict(con.execute(
+                "SELECT status, COUNT(*) FROM tasks GROUP BY status").fetchall())
+            active = con.execute(
+                "SELECT COALESCE(assignee,'worker'), title FROM tasks "
+                "WHERE completed_at IS NULL AND started_at IS NOT NULL "
+                "ORDER BY started_at DESC LIMIT 1").fetchone()
+            done24 = con.execute(
+                "SELECT COUNT(*) FROM tasks WHERE completed_at >= ?",
+                (time.time() - 86400,)).fetchone()[0]
+            last_done = con.execute(
+                "SELECT title FROM tasks WHERE completed_at IS NOT NULL "
+                "ORDER BY completed_at DESC LIMIT 1").fetchone()
+        finally:
+            con.close()
+    except Exception:
+        return {"type": "page", "slot": 2, "title": "FLEET: db unreadable", "lines": []}
+    running = sum(v for k, v in by_status.items()
+                  if str(k).lower() in ("claimed", "running", "in_progress"))
+    queued = sum(v for k, v in by_status.items()
+                 if str(k).lower() in ("queued", "todo", "backlog", "open", "pending"))
+    blocked = sum(v for k, v in by_status.items() if "block" in str(k).lower())
+    lines = [_fit(f"run:{running} queue:{queued} blocked:{blocked} done24h:{done24}")]
+    if active:
+        lines.append(_fit(f"> {active[0]}: {active[1]}"))
+    elif last_done:
+        lines.append(_fit(f"last done: {last_done[0]}"))
+    if not any(by_status.values() if by_status else []):
+        lines = ["no tasks on the board"]
+    return {"type": "page", "slot": 2,
+            "title": f"FLEET: {'ACTIVE' if running else 'idle'}", "lines": lines}

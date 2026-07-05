@@ -163,15 +163,16 @@ static uint32_t nextBlinkMs = 7000;
 // content rotates 90° CW to compensate. Full-screen tabbed pages, swipe or
 // tap the tab bar to move. Logical canvas: 320x240.
 enum UiPage : uint8_t {
-  PAGE_FACE = 0,
-  PAGE_MSGS = 1,
-  PAGE_OPS  = 2,
-  PAGE_CRON = 3,
-  PAGE_NET  = 4,
-  PAGE_DEV  = 5,
-  PAGE_COUNT = 6,
+  PAGE_FACE  = 0,
+  PAGE_MSGS  = 1,
+  PAGE_OPS   = 2,
+  PAGE_FLEET = 3,
+  PAGE_CRON  = 4,
+  PAGE_NET   = 5,
+  PAGE_DEV   = 6,
+  PAGE_COUNT = 7,
 };
-static const char* const PAGE_TABS[PAGE_COUNT] = {"FACE", "MSGS", "OPS", "CRON", "NET", "DEV"};
+static const char* const PAGE_TABS[PAGE_COUNT] = {"FACE", "MSGS", "OPS", "FLEET", "CRON", "NET", "DEV"};
 
 static constexpr int16_t LW = 320;        // logical landscape width
 static constexpr int16_t LH = 240;        // logical landscape height
@@ -237,9 +238,10 @@ struct HostPage {
   String title;
   String l1;
   String l2;
+  String l3;
   bool set = false;
 };
-static HostPage hostPages[2];
+static HostPage hostPages[3];   // 0 cron, 1 gateway vitals, 2 fleet
 
 // THE DECK: host-defined programmable buttons on the OPS tab (3x2 grid).
 // confirm-flagged buttons arm on first tap ("SURE?") and fire on the second.
@@ -1064,16 +1066,19 @@ static void redraw() {
         }
       }
     }
-  } else if (uiPage == PAGE_CRON || uiPage == PAGE_NET) {
-    HostPage &hp = hostPages[uiPage == PAGE_CRON ? 0 : 1];
+  } else if (uiPage == PAGE_CRON || uiPage == PAGE_NET || uiPage == PAGE_FLEET) {
+    int slot = (uiPage == PAGE_CRON) ? 0 : (uiPage == PAGE_NET ? 1 : 2);
+    HostPage &hp = hostPages[slot];
+    static const char* defTitle[3] = {"CRON JOBS", "GATEWAY", "FLEET"};
     gfx->setTextColor(INK, BG);
     gfx->setCursor(8, CY + 6);
     gfx->print("> ");
-    gfx->print(hp.set ? hp.title : String(uiPage == PAGE_CRON ? "CRON JOBS" : "GATEWAY"));
+    gfx->print(hp.set ? hp.title : String(defTitle[slot]));
     gfx->drawFastHLine(8, CY + 18, LW - 16, DIM);
     gfx->setTextColor(GREEN, BG);
     drawWrapped(hp.set ? hp.l1 : String("no data from host yet"), 8, CY + 28, 50, 2, GREEN);
     drawWrapped(hp.l2, 8, CY + 58, 50, 2, GREEN);
+    drawWrapped(hp.l3, 8, CY + 88, 50, 2, GREEN);
   } else if (uiPage == PAGE_DEV) {
     gfx->setTextColor(INK, BG);
     gfx->setCursor(8, CY + 6);   gfx->print("> DEVICE");
@@ -1310,10 +1315,11 @@ static void applyJsonLine(const String &line) {
   }
   if (doc["type"] == "page") {
     int slot = doc["slot"] | 0;
-    if (slot < 0 || slot > 1) slot = 0;
-    hostPages[slot].title = String((const char*)(doc["title"] | (slot == 0 ? "CRON" : "GATEWAY")));
+    if (slot < 0 || slot > 2) slot = 0;
+    hostPages[slot].title = String((const char*)(doc["title"] | "HOST"));
     hostPages[slot].l1 = String((const char*)(doc["lines"][0] | ""));
     hostPages[slot].l2 = String((const char*)(doc["lines"][1] | ""));
+    hostPages[slot].l3 = String((const char*)(doc["lines"][2] | ""));
     hostPages[slot].set = true;
     st.connected = true;
     st.lastSeenMs = millis();
