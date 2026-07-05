@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+ios/PocketFamiliar/build/
+ios/PocketFamiliar/*.xcodeproj/

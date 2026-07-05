@@ -1,0 +1,29 @@
+# xcodegen spec — run `xcodegen generate` here, then open PocketFamiliar.xcodeproj
+name: PocketFamiliar
+options:
+  bundleIdPrefix: com.titaniumcomputing
+  deploymentTarget:
+    iOS: "16.4"
+  createIntermediateGroups: true
+targets:
+  PocketFamiliar:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Pocket Familiar
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        # plain ws:// over LAN/tailnet — WireGuard encrypts the tailnet leg;
+        # token auth is the gate (see plugin transport docs)
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.9"
+        CODE_SIGN_STYLE: Automatic
