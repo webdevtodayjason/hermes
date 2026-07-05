@@ -18,6 +18,12 @@ fi
 # local install: file:// git clone of this repo, plugin/ subdir (#fragment)
 hermes plugins install "file://$HERE#plugin" --force --enable
 
+# install the operator skill so Hermes knows how to drive the familiar
+if [ -f "$HERE/skill/SKILL.md" ]; then
+  ln -sfn "$HERE/skill" "$HERMES_HOME/skills/familiar"
+  echo "✓ familiar operator skill linked into $HERMES_HOME/skills/"
+fi
+
 echo
 echo "Done. Restart the gateway to activate:  hermes gateway restart"
 echo "Then plug in the Familiar (any /dev/cu.usbmodem*) — it hot-connects."

@@ -106,11 +106,31 @@ class JobManager:
 
     def __init__(self, actions: list[dict] | None = None):
         self.actions = actions if actions is not None else load_config().get("actions", [])
+        self._cfg_mtime = self._config_mtime()
         self.proc: subprocess.Popen | None = None
         self.label = ""
         self.paused = False
         self.started_at = 0.0
         self.running_index = -1   # index into enabled actions, -1 = none
+
+    @staticmethod
+    def _config_mtime() -> float:
+        try:
+            return config_path().stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def reload_if_changed(self) -> bool:
+        """Re-read familiar_actions.json when it changed on disk AND no job is
+        running (so a live job's index stays valid). Returns True if reloaded."""
+        if self.active:
+            return False
+        mt = self._config_mtime()
+        if mt == self._cfg_mtime:
+            return False
+        self._cfg_mtime = mt
+        self.actions = load_config().get("actions", [])
+        return True
 
     # -- state -------------------------------------------------------------
 

@@ -160,6 +160,7 @@ def _maybe_push_pages() -> None:
         return
     _pages["at"] = now
     try:
+        _jobs.reload_if_changed()   # hot-reload the deck when the config file changes
         _link.send(_feeds.cron_page())
         _link.send(_feeds.vitals_page(_started["at"], _stats))
         _link.send(_feeds.fleet_page())

@@ -148,6 +148,33 @@ def test_deck_start_by_index_and_toggle_cancel():
     assert jm.status()["job_index"] == -1
 
 
+def test_deck_hot_reloads_when_config_changes(monkeypatch, tmp_path):
+    import json as _json
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    cfg = tmp_path / "familiar_actions.json"
+    cfg.write_text(_json.dumps({"actions": [
+        {"id": "a", "label": "A", "enabled": True, "prompt": "x"}]}))
+    jm = actions.JobManager()
+    assert len(jm.actions) == 1
+    assert jm.reload_if_changed() is False       # unchanged
+    # rewrite with a newer mtime + a second button
+    cfg.write_text(_json.dumps({"actions": [
+        {"id": "a", "label": "A", "enabled": True, "prompt": "x"},
+        {"id": "b", "label": "B", "enabled": True, "prompt": "y"}]}))
+    import os as _os
+    future = cfg.stat().st_mtime + 10
+    _os.utime(cfg, (future, future))
+    assert jm.reload_if_changed() is True
+    assert len(jm.actions) == 2
+    # a running job blocks reload (index must stay valid)
+    jm.actions = [{"id": "s", "label": "S", "enabled": True, "command": ["sleep", "3"]}]
+    jm.start_by_index(0)
+    cfg.write_text(_json.dumps({"actions": []}))
+    _os.utime(cfg, (future + 20, future + 20))
+    assert jm.reload_if_changed() is False       # busy — deferred
+    jm.cancel()
+
+
 def test_prompt_actions_become_hermes_chat_commands():
     cmd = actions._action_command({"prompt": "say hi"})
     assert cmd == ["hermes", "chat", "-q", "say hi"]
