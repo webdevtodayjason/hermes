@@ -95,6 +95,34 @@ def compact(s: str, n: int = 120) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+_NOISE_PREFIXES = ("Warning:", "Query:", "Initializing", "Resume this",
+                   "Session:", "Duration:", "Messages:", "hermes --resume", "─")
+
+
+def clean_output(text: str) -> str:
+    """Pull the real answer out of `hermes chat -q` output (which wraps the
+    reply in a ╭─ Hermes ─╮ … ╰──╯ box amid warnings + a query echo). Plain
+    command output (no box) just has its noise lines stripped."""
+    lines = (text or "").splitlines()
+    box, in_box = [], False
+    for ln in lines:
+        s = ln.strip()
+        if not in_box and s.startswith("╭") and "Hermes" in s:
+            in_box = True
+            continue
+        if in_box and s.startswith("╰"):
+            break
+        if in_box:
+            content = s.lstrip("│").strip()
+            if content:
+                box.append(content)
+    if box:
+        return " ".join(box)
+    keep = [s for ln in lines
+            if (s := ln.strip()) and not s.startswith(_NOISE_PREFIXES)]
+    return " ".join(keep)
+
+
 def _resolve_approval(session_key: str, choice: str) -> int:
     """Unblock a pending gateway approval. Returns count resolved (0 = none)."""
     from tools.approval import resolve_gateway_approval  # gateway process only
@@ -144,7 +172,7 @@ class JobManager:
             rc = self.proc.returncode
             out = self._out_buf or ""   # drained by the reader thread — no pipe deadlock
             self._result = {"label": self.label, "rc": rc,
-                            "text": compact(out, 300) or f"{self.label} done (rc={rc})"}
+                            "text": compact(clean_output(out), 300) or f"{self.label} done (rc={rc})"}
             self.proc = None
             self.paused = False
             self.running_index = -1

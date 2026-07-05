@@ -191,6 +191,19 @@ def test_job_output_is_captured_and_popped():
     assert jm.pop_result() is None   # cleared after pop
 
 
+def test_clean_output_extracts_hermes_answer():
+    raw = ("Warning: Unknown toolsets: mcp-codegraph\n"
+           "Query: brief please\nInitializing agent...\n───────\n\n"
+           "╭─ ⚕ Hermes ─────╮\n    The real answer line one.\n\n"
+           "    And line two.\n╰──────╯\n\nResume this session with:\n"
+           "  hermes --resume 123\nSession: 123")
+    out = actions.clean_output(raw)
+    assert out == "The real answer line one. And line two."
+    assert "Warning" not in out and "Query" not in out
+    # plain command output (no box) passes through, noise stripped
+    assert actions.clean_output("goodnight Sat Jul 5") == "goodnight Sat Jul 5"
+
+
 def test_prompt_actions_become_hermes_chat_commands():
     cmd = actions._action_command({"prompt": "say hi"})
     assert cmd == ["hermes", "chat", "-q", "say hi"]
