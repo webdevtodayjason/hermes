@@ -5,8 +5,106 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Build a Familiar — a desk companion for your Hermes agent</title>
 <meta name="description" content="An open ESP32-S3 desk companion for the Hermes agent platform: live agent state, tap-to-approve, a voice, and a green phosphor soul. Build one.">
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📟</text></svg>">
+<link rel="canonical" href="https://buildafamiliar.com/">
+<link rel="agent-manifest" type="text/plain" href="/agent.txt">
+<link rel="alternate" type="text/agent-view; version=1" href="/index.agent">
+<link rel="alternate" type="text/plain" href="/llms.txt" title="LLMs context">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://buildafamiliar.com/#org",
+      "name": "Build a Familiar",
+      "url": "https://buildafamiliar.com/",
+      "logo": "https://buildafamiliar.com/face.gif",
+      "sameAs": [
+        "https://github.com/webdevtodayjason/hermes"
+      ]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://buildafamiliar.com/#website",
+      "name": "Build a Familiar",
+      "url": "https://buildafamiliar.com/",
+      "publisher": {
+        "@id": "https://buildafamiliar.com/#org"
+      },
+      "inLanguage": "en",
+      "potentialAction": {
+        "@type": "ReadAction",
+        "name": "Read the agent setup runbook",
+        "target": "https://buildafamiliar.com/agent.md"
+      }
+    },
+    {
+      "@type": "Product",
+      "@id": "https://buildafamiliar.com/#familiar",
+      "name": "Hermes Familiar",
+      "description": "Open ESP32-S3 desk companion for Hermes Agent with live state, approvals, voice, and action buttons.",
+      "brand": {
+        "@id": "https://buildafamiliar.com/#org"
+      },
+      "category": "Open hardware agent companion",
+      "url": "https://buildafamiliar.com/",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD",
+        "availability": "https://schema.org/PreOrder",
+        "url": "https://buildafamiliar.com/build.html"
+      }
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://buildafamiliar.com/#webpage",
+      "url": "https://buildafamiliar.com/",
+      "name": "Build a Familiar",
+      "isPartOf": {
+        "@id": "https://buildafamiliar.com/#website"
+      },
+      "about": {
+        "@id": "https://buildafamiliar.com/#familiar"
+      },
+      "inLanguage": "en"
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://buildafamiliar.com/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What is a Familiar?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "A Familiar is an ESP32-S3 desk companion that gives Hermes Agent a physical screen, chirp, voice, approval surface, and action deck."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can an agent set it up?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. The site exposes /agent.md plus AVL companion documents so a local Hermes agent can install the plugin, provision Wi-Fi, and verify the device."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is this affiliated with Nous Research?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. Familiar is an independent third-party project for the Hermes agent platform and uses the official plugin surface."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
 </head>
 <body>
 <div class="crt">
@@ -17,6 +115,7 @@
     <a href="flash.html">FLASH</a>
     <a href="roadmap.html">ROADMAP</a>
   </nav>
+  <p class="agent-link"><a href="/index.agent" rel="alternate agent-view" type="text/agent-view; version=1">Agent view of this page</a></p>
   <header class="hero">
     <div class="sysline">hermes familiar // an open desk companion // third-party hermes plugin</div>
     <h1>BUILD A FAMILIAR<span class="cursor"></span></h1>
@@ -129,6 +228,22 @@ swipe L/R or tap tabs to navigate</div>
         machine-readable setup runbook. Once your familiar is flashed and plugged in, tell your
         Hermes agent: <i>"set up my familiar from buildafamiliar.com/agent.md"</i> — and it
         installs its own body.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="seclabel"><h2>Agent handoff</h2><div class="rule"></div></div>
+      <div class="card">
+        <p>Machine-readable surfaces are first-class here. Send your assistant to the exact route it needs:</p>
+        <form class="handoff" method="get" action="/agent.md" aria-label="Choose an agent handoff route">
+          <label for="handoff-route">Agent route</label>
+          <select id="handoff-route" name="route">
+            <option value="setup">Set up a flashed Familiar</option>
+            <option value="build">Understand the hardware build</option>
+            <option value="plugin">Install and verify the Hermes plugin</option>
+          </select>
+          <button type="submit">Open runbook</button>
+        </form>
       </div>
     </section>
   </main>

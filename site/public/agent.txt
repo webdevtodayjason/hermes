@@ -1,0 +1,57 @@
+# AVL Manifest — Build a Familiar
+# Discovery file for AI agents. Like robots.txt but for agent-native views.
+
+version: 1
+profile: avl-3.0-static
+content-type: text/agent-view; version=1
+site: https://buildafamiliar.com
+generated: 2026-07-05T16:35:05Z
+
+summary: Open ESP32-S3 desk companion for Hermes Agent with live state, approvals, voice, an action deck, and an agent-readable setup runbook.
+
+# Discovery mechanisms supported
+discovery:
+  - suffix          # GET /<route>.agent
+  - html-link       # <link rel="alternate" type="text/agent-view; version=1">
+  - body-link       # crawlable body anchor to each page companion
+  - manifest        # GET /agent.txt
+  - well-known      # GET /.well-known/agent-view and /.well-known/avl
+  - accept-header   # Accept: text/agent-view on known HTML routes
+
+routes:
+  - GET /.agent
+  - GET /index.agent
+  - GET /build.agent
+  - GET /plugin.agent
+  - GET /flash.agent
+  - GET /roadmap.agent
+  - GET /agent.md
+  - GET /llms.txt
+  - GET /llms-full.txt
+
+agent_views:
+  - GET /.agent
+  - GET /index.agent
+  - GET /build.agent
+  - GET /plugin.agent
+  - GET /flash.agent
+  - GET /roadmap.agent
+
+fetcher_hints:
+  safe_methods: [GET, HEAD]
+  body_link: true
+  head_link: true
+  conditional_requests: false
+
+human_entrypoints:
+  - https://buildafamiliar.com/
+  - https://buildafamiliar.com/build.html
+  - https://buildafamiliar.com/plugin.html
+  - https://buildafamiliar.com/flash.html
+  - https://buildafamiliar.com/roadmap.html
+
+agent_runbook: https://buildafamiliar.com/agent.md
+llms: https://buildafamiliar.com/llms.txt
+llms_full: https://buildafamiliar.com/llms-full.txt
+sitemap: https://buildafamiliar.com/sitemap.xml
+contact: https://github.com/webdevtodayjason/hermes

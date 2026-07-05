@@ -1,0 +1,163 @@
+# Build a Familiar — full site context
+
+Generated: 2026-07-05T16:35:05Z
+
+This file is curated for LLMs and agents. Canonical machine setup is /agent.md; AVL manifest is /agent.txt.
+
+# Build a Familiar
+
+URL: https://buildafamiliar.com/
+Agent view: https://buildafamiliar.com/index.agent
+
+Build a Familiar — a desk companion for your Hermes agent 📟 "> FACE BUILD PLUGIN FLASH ROADMAP hermes familiar // an open desk companion // third-party hermes plugin BUILD A FAMILIAR Your Hermes agent works all day — in chats, in cron jobs, in worker fleets — and all of it is invisible. A familiar is a small green-phosphor creature that sits on your desk and gives that workforce a body: it shows what the agent is doing the moment it happens, pulses when an approval needs you (tap ALLOW right on the screen), runs your actions from a button , and — with a speaker — talks . FACE MSGS OPS CRON NET DEV AWAKE S 5 R 1 W 0 TOK 48k USB ok NET ok > RECENT TRAFFIC 10:41 u: ping my desk when the deploy is green 10:41 a: on it — watching the pipeline now 10:43 k: worker-2 claimed T-88 (migrate) 10:44 a: deploy is green. site is live. 10:44 !: DEPLOY finished — buildafamiliar.com 200 BRIEF STANDUP LOOM INBOX DEPLOY 2TAP GONITE 2TAP > CRON: 2 ACTIVE 17:17 mail watcher ok 09:00 morning digest ok — nightly backup next 02:00 > GATEWAY up 6h04m te:ok sl:ok S:5 tools:41 tok:48k familiar 192.168.100.82 usb+wifi > DEVICE SD:122024MB TP:CST328 BAT:3.98V RTC:-- WiFi:192.168.100.82 rot:1 heap:211264 swipe L/R or tap tabs to navigate ↑ tap the tabs — this is her actual screen What she does Live state — thinking, tool activity, replies, across every platform your gateway serves (Telegram, Slack, cron, kanban workers) Real approvals — when the agent blocks on a dangerous command, she pulses and chirps; your tap resolves it, same as /approve She reaches out — the agent gets a familiar_notify tool: banner + chirp + optional speech when something needs your desk A voice — replies and alerts spoken in your configured TTS voice, streamed over your LAN into her speaker An evening ritual — once a day she speaks a digest of everything your agents did, composed by your own model What it takes ~$30 of hardware (one touchscreen dev board, a microSD card, a tiny speaker), a USB-C cable to the machine running your Hermes gateway, and one plugin install. Firmware flashes from your browser — no toolchain. See BUILD for the full bill of materials and PLUGIN for the software side. status   Docs preview — the public firmware release, browser flasher, and printable case files are landing now. Star the repo to follow along. For your agent, not just for you This site is agent-first : agent.md is a machine-readable setup runbook. Once your familiar is flashed and plugged in, tell your Hermes agent: "set up my familiar from buildafamiliar.com/agent.md" — and it installs its own body. Familiar is an independent third-party project for the Hermes agent platform — built entirely on the official plugin surface. Not affiliated with Nous Research. // MIT licensed // github
+
+# Build guide
+
+URL: https://buildafamiliar.com/build.html
+Agent view: https://buildafamiliar.com/build.agent
+
+Build — hardware guide & bill of materials 📟 "> FACE BUILD PLUGIN FLASH ROADMAP hardware // bill of materials // assembly THE BUILD One dev board does almost everything — screen, touch, Wi-Fi, BLE, SD, audio amp — so the "build" is closer to assembly than electronics. No soldering. Bill of materials Part Spec ~Cost Where Waveshare ESP32-S3-Touch-LCD-2.8 ST7789 240×320 IPS · 5-pt CST328 touch · I2S amp + volume dial · SD slot · Wi-Fi/BLE · speakers included in the kit $35 amazon · waveshare Battery (optional) MakerFocus 3.7V 2000 mAh 1S LiPo (103450) w/ protection board, JST 1.25 — fits under the board inside the case $22 / 4-pack amazon microSD card any 8 GB+, FAT32 — holds her face & sound pack; the default Hermes CRT pack ships in the repo, and a community Pack Exchange is on the roadmap $6 anywhere Brass standoffs + M2.5 bolts 4× standoffs raise the board for battery clearance; M2.5 bolts secure the case bottom $8 amazon link soon USB-C cable data-capable, to your gateway machine — your drawer Case coming snap-fit 3D-printable landscape stand — CAD + Bambu 3MF will live in the repo. No printer? A print-on-demand button is planned filament this site Assembly 1. Flash the firmware — from your browser on the FLASH page (WebSerial, Chrome/Edge), or with PlatformIO from the repo 2. Load the SD card — copy the hermes-buddy/ asset pack (face animations, sounds) to a FAT32 card, insert 3. Plug a speaker — the kit's included speaker goes straight into the board's speaker jack; set the on-board volume dial to taste 4. Battery (optional) — the LiPo plugs into the BAT connector and tucks under the board; four brass standoffs give it clearance inside the case 5. Case — snap-fit print, M2.5 bolts on the bottom 6. USB into your gateway machine — the plugin finds her automatically on any port 7. Install the plugin — one command, see PLUGIN ; Wi-Fi credentials are provisioned over USB, no SD editing Orientation: she sits landscape, USB exiting to the side. If the screen comes up inverted for your stand, rotation is a one-line config over USB — never a reflash. The board, briefly ESP32-S3 (240 MHz dual-core, 8 MB flash), 2.8" IPS at 240×320 driven through LovyanGFX, CST328 capacitive touch, I2S mono amplifier to the speaker jack, SD over SDMMC, native USB-CDC serial. The familiar uses USB as its control channel and Wi-Fi only to pull audio — so it works fully even on a network-less bench, just silently. Familiar is an independent third-party project for the Hermes agent platform. // MIT licensed // github
+
+# Hermes plugin
+
+URL: https://buildafamiliar.com/plugin.html
+Agent view: https://buildafamiliar.com/plugin.agent
+
+Plugin — install the familiar into Hermes 📟 "> FACE BUILD PLUGIN FLASH ROADMAP software // native hermes plugin // official surface only THE PLUGIN Everything on the host side is a standard third-party Hermes plugin — manifest, hook registration, a registered tool, a slash command. No gateway patches, no forks. It lives inside your always-on gateway process: no daemon, no polling. Install hermes plugins install webdevtodayjason/hermes/plugin --enable ~/.hermes/hermes-agent/venv/bin/pip install pyserial hermes gateway restart Plug the familiar into any USB port — she's found automatically and survives unplug/replug. /familiar in any Hermes chat shows link status; /familiar say hello is the ten-second voice test. note   The repo goes public with the first release — until then this command works for collaborators only. What it wires up Gateway event On the device agent thinking / using tools portrait animates, activity label ("searching the web…") reply sent (any platform) message ticker + banner toast on any tab dangerous-command approval pending ALLOW / DENY takeover, pulse + chirp until answered — your tap resolves the real approval agent calls familiar_notify banner + chirp, optionally spoken aloud kanban task claimed / done / blocked ticker; blocked tasks alert the desk daily at 18:30 (configurable) the evening ritual : a spoken digest of the day, composed by your own model Voice uses your gateway's own TTS config (ElevenLabs, OpenAI, Edge — whatever you run); audio streams over your LAN to her speaker. Configuration lives in ~/.hermes/familiar_actions.json — action buttons, voice, quiet options, all documented in the repo. Let your agent do this The entire setup is encoded machine-readably at /agent.md . Flash her on the FLASH page, plug her in, then tell your Hermes: Set up my familiar. Follow https://buildafamiliar.com/agent.md Familiar is an independent third-party project for the Hermes agent platform. // MIT licensed // github
+
+# Browser firmware flasher
+
+URL: https://buildafamiliar.com/flash.html
+Agent view: https://buildafamiliar.com/flash.agent
+
+Flash — firmware in your browser 📟 "> FACE BUILD PLUGIN FLASH ROADMAP firmware // webserial flasher // chrome + edge FLASH HER Plug the board into this computer, click the button, pick the serial port — firmware installs from the browser via WebSerial. No toolchain, no python, no drivers on macOS/Linux (Windows may want the usual USB driver). Browser flasher live   Firmware v0.4.0 · ESP32-S3 · flashes the full factory image (bootloader + app). Your settings live on the SD card and over USB provisioning, so reflashing never loses them. Use Chrome or Edge (WebSerial) — Safari and Firefox can't flash Plug the board into this computer with a data-capable USB-C cable Click, pick the serial port (usually usbmodem… / COM… ), wait ~30 seconds ⚡ Flash her now This browser can't flash — use Chrome or Edge. WebSerial needs HTTPS — reload via https://buildafamiliar.com If the port never appears: hold the board's BOOT button while plugging in, then try again. Prefer a toolchain? The source route still works: git clone https://github.com/webdevtodayjason/hermes cd hermes && pio run -t upload After flashing She boots to the FACE tab; swipe or tap tabs to explore USB into your gateway machine + install the plugin — the link comes up by itself Wi-Fi (for voice) is provisioned over USB by the plugin or your agent via agent.md — no SD card editing Wrong-way-up on your stand? Rotation is a one-line config over USB Familiar is an independent third-party project for the Hermes agent platform. // MIT licensed // github
+
+# Roadmap
+
+URL: https://buildafamiliar.com/roadmap.html
+Agent view: https://buildafamiliar.com/roadmap.agent
+
+Roadmap — where the familiar is going 📟 "> FACE BUILD PLUGIN FLASH ROADMAP hermes familiar // project roadmap // updated 2026-07-05 ROADMAP Where the familiar is going. The foundation — plugin, live state, approvals, voice pipeline, landscape UI — shipped in the project's first arc; everything below builds on it. plugin v0.4 ui pip-boy landscape flasher live in your browser license MIT Shipped [ok] Native third-party plugin — official Hermes manifest, hooks, tool, slash command, operator skill. No forks, no gateway patches. [ok] Live nervous system — agent state from every platform; tap-to-resolve real dangerous-command approvals (with the command shown), pulse + chirp until answered. [ok] The agent can reach the desk — a familiar_notify tool: banner, chirp, optional speech. [ok] THE DECK — a grid of programmable buttons; each runs a script, a workflow, or a prompt, with a floating "working" pill and the result spoken + shown when it lands. [ok] The operator's console — message scrollback, an approval detail view, and a fleet tab for background workers. [ok] Voice + presence — the gateway's own TTS streamed to the speaker; volume, quiet hours, a nightly digest, and a morning greeting. [ok] Untethered — runs over Wi-Fi when unplugged (auto-provisioned over USB — connect once, then cut the cord), with idle-dim battery discipline. [ok] Pip-Boy landscape UI — six tap/swipe tabs, vitals column, banner toasts, runtime rotation config. [ok] Browser flasher + agent-first setup — flash the factory image over WebSerial from this site, then hand your agent agent.md to finish setup. Phases NEXT Landscape-Native Art building Today she wears portrait art adapted to the wide screen (the face above is the source art). This phase designs her for the landscape: full 320×240 scenes with the vitals column composed in. The artist spec is written. Artist canvas spec — dimensions, safe zones, animation state sets, so anyone can draw her a new face   — done Landscape pack export — the PNG→SD toolchain emits wide-format packs Boot splash — a proper retro power-on sequence Procedural CRT life — scanline drift, phosphor flicker, glitch transitions NEXT Sound Pack on the speaker Voice, volume, quiet hours, and the morning/evening digests are already in. What's left is making the little sounds good. SD sound pack — real boot / alert / done chimes replacing the square-wave beeps Swappable sound themes — part of the pack format, shared on the exchange below NEXT Community in progress Everything you need to build, flash, and dress your own familiar — from this site, with your agent's help. Browser flasher + agent.md — shipped, see FLASH Printable case — snap-fit landscape stand; CAD + Bambu 3MF land in the repo, with a print-on-demand option for the printerless PACK EXCHANGE — community face & sound packs: browse, download, submit your own. The pack format already exists; the exchange makes her a canvas Public repo + demo mode — runs standalone without a gateway, for the bench LATER Familiar Everywhere later The transport is already networked, so the "device" no longer has to be an ESP32. The same plugin can drive a second surface in your pocket. Phone app — the same tabs, ticker, approvals, and deck, from anywhere Push notifications — approvals reach you away from the desk Multi-familiar — several devices, one gateway: desk, workshop, rack room This roadmap evolves with the project — order is intent, not promise. Familiar is an independent third-party project for the Hermes agent platform. // MIT licensed // github
+
+# Agent setup runbook
+
+# Familiar setup runbook (agent-readable)
+
+You are an AI agent (likely Hermes) setting up a "familiar" — an ESP32-S3 desk
+companion device — for your operator. Their machine runs a Hermes gateway.
+Follow these steps in order. Each step has a verification; do not proceed past
+a failed verification without telling your operator.
+
+## Preconditions
+
+- The device is flashed (https://buildafamiliar.com/flash.html) and connected by
+  USB to the machine where the Hermes gateway runs.
+- You can run shell commands on that machine.
+- Voice requires the familiar to have a speaker connected and to be provisioned
+  onto the same LAN as the gateway. Banner/chirp still work over USB without
+  Wi-Fi.
+
+## Step 1 — install the plugin
+
+```bash
+hermes plugins install webdevtodayjason/hermes/plugin --enable
+~/.hermes/hermes-agent/venv/bin/pip install pyserial
+```
+
+Verify: `hermes plugins list` shows `familiar | enabled`.
+
+## Step 2 — restart the gateway
+
+```bash
+hermes gateway restart
+```
+
+Verify (within ~30s): the gateway log contains `familiar connected on /dev/...`:
+
+```bash
+grep -a "familiar" ~/.hermes/logs/agent.log | tail -5
+```
+
+If it shows `familiar serial link started` but no `connected`: the device may
+need a replug, or another process holds the port. The plugin self-recovers;
+wait 60s and re-check before escalating.
+
+## Step 3 — provision Wi-Fi (enables voice)
+
+Ask your operator for the 2.4/5GHz SSID + password that shares a LAN with this
+machine, or ask them to provide those values through their preferred secret
+handling method. Do not log or repeat the password back.
+
+With the gateway stopped (`hermes gateway stop`), discover the device port:
+
+```bash
+ls /dev/cu.usbmodem* /dev/ttyACM* 2>/dev/null
+```
+
+Then send newline-terminated JSON over serial at 115200 baud:
+
+```json
+{"type":"config","wifi":{"ssid":"<SSID>","password":"<PASSWORD>"}}
+```
+
+Concrete provisioning helper:
+
+```bash
+python3 - <<'PY'
+import getpass, json, sys, time
+try:
+    import serial
+except ImportError:
+    raise SystemExit("pyserial missing; run: ~/.hermes/hermes-agent/venv/bin/pip install pyserial")
+
+port = input("Device port (/dev/cu.usbmodem... or /dev/ttyACM...): ").strip()
+ssid = input("Wi-Fi SSID: ").strip()
+password = getpass.getpass("Wi-Fi password: ")
+payload = {"type": "config", "wifi": {"ssid": ssid, "password": password}}
+
+with serial.Serial(port, 115200, timeout=2) as s:
+    s.write((json.dumps(payload) + "\n").encode())
+    deadline = time.time() + 45
+    saw_wifi = False
+    while time.time() < deadline:
+        line = s.readline().decode(errors="replace").strip()
+        if not line:
+            continue
+        print(line)
+        try:
+            msg = json.loads(line)
+        except Exception:
+            continue
+        if msg.get("ack") == "config" and msg.get("ok") is not True:
+            sys.exit("Device rejected config")
+        if msg.get("wifi") == "ok":
+            saw_wifi = True
+            break
+    if not saw_wifi:
+        sys.exit("Timed out waiting for wifi ok")
+PY
+```
+
+Expect `{"ack":"config","ok":true}` then `{"wifi":"ok","ip":"<addr>"}`.
+Restart the gateway (`hermes gateway start`).
+
+Verify: `curl http://<device-ip>/status` returns JSON with
+`"wifi":"WiFi:<ip>"`.
+
+## Step 4 — self-test
+
+- `/familiar` in any Hermes chat → link status line
+- `/familiar ping` → device shows a banner and chirps
+- `/familiar say hello operator` → device speaks (requires speaker + Wi-Fi)
+
+## Step 5 — tell your operator
+
+Report: link state, device IP, whether speech played, and that the
+`familiar_notify` tool is now available to you. Use it whenever you need
+their attention at the desk: long task done, blocked, approval waiting.
+
+## Config reference
+
+`~/.hermes/familiar_actions.json` — action buttons, voice enable/port,
+ritual time (`{"ritual":{"time":"18:30"}}`), loom board path. Full docs:
+https://github.com/webdevtodayjason/hermes

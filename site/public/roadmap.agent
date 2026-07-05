@@ -1,0 +1,45 @@
+@meta
+  v: 1
+  route: /roadmap.html
+  generated: 2026-07-05T16:35:05Z
+  ttl: 10m
+
+@intent
+  purpose:    Explain the Familiar roadmap and current project status.
+  audience:   operator, builder, hermes-agent, ai-crawler
+  capability: read, navigate, setup, verify
+
+@state
+  page:
+    title: Roadmap
+    canonical: https://buildafamiliar.com/roadmap.html
+    companion: https://buildafamiliar.com/roadmap.agent
+    primary_topic: roadmap
+  capabilities[5]: live_state, tap_approval, familiar_notify, voice, action_deck
+  surfaces[4]{id,name,status}:
+    project,Hermes Familiar,open hardware companion
+    firmware,ESP32-S3,browser flashable
+    plugin,Hermes third-party,no gateway fork
+    agent_surface,AVL 3.0 static profile,agent.txt and page companions
+
+@actions
+  - id: view_human
+    method: GET
+    href: /roadmap.html
+  - id: read_setup_runbook
+    method: GET
+    href: /agent.md
+  - id: read_manifest
+    method: GET
+    href: /agent.txt
+
+@context
+  > Familiar is an independent third-party desk companion for Hermes Agent.
+  > The canonical agent setup runbook is /agent.md. Do not invent hardware or business facts.
+  > Voice requires speaker hardware plus Wi-Fi on the same LAN as the Hermes gateway.
+
+@nav
+  self:      /roadmap.agent
+  parents:   [/.agent]
+  peers:     [/index.agent, /build.agent, /plugin.agent, /flash.agent]
+  drilldown: /agent.md

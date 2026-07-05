@@ -550,7 +550,7 @@ def _tool_notify(args=None, **kw) -> str:
     """
     try:
         from tools.registry import tool_error, tool_result
-    except ImportError:  # outside the hermes runtime (tests)
+    except Exception:  # outside/incompatible hermes runtime (tests on system Python)
         tool_result = lambda **k: json.dumps(k)          # noqa: E731
         tool_error = lambda m, **k: json.dumps({"error": str(m), **k})  # noqa: E731
     args = args if isinstance(args, dict) else {}

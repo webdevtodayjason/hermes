@@ -142,3 +142,10 @@ td b { color: var(--ink); }
 
 footer { margin-top: 34px; color: var(--faint); font-size: 12px; line-height: 1.7; }
 footer a { color: var(--dim); }
+
+.agent-link { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.handoff { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-top: 14px; }
+.handoff label { display: block; width: 100%; color: var(--dim); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; }
+.handoff select, .handoff button { font-family: var(--mono); background: #071008; color: var(--ink); border: 1px solid var(--edge); padding: 10px 12px; }
+.handoff button { cursor: pointer; border-color: var(--ink); text-transform: uppercase; letter-spacing: .12em; }
+.handoff button:hover { background: #0e1b10; }

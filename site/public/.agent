@@ -1,0 +1,54 @@
+@meta
+  v: 1
+  route: /
+  generated: 2026-07-05T16:35:05Z
+  ttl: 10m
+
+@intent
+  purpose:    Explain the Familiar project and route agents to build flash plugin and setup resources.
+  audience:   operator, builder, hermes-agent, ai-crawler
+  capability: read, navigate, setup, verify
+
+@state
+  page:
+    title: Build a Familiar
+    canonical: https://buildafamiliar.com/
+    companion: https://buildafamiliar.com/index.agent
+    primary_topic: overview
+  capabilities[5]: live_state, tap_approval, familiar_notify, voice, action_deck
+  surfaces[4]{id,name,status}:
+    project,Hermes Familiar,open hardware companion
+    firmware,ESP32-S3,browser flashable
+    plugin,Hermes third-party,no gateway fork
+    agent_surface,AVL 3.0 static profile,agent.txt and page companions
+
+@actions
+  - id: view_human
+    method: GET
+    href: /
+  - id: read_setup_runbook
+    method: GET
+    href: /agent.md
+  - id: read_manifest
+    method: GET
+    href: /agent.txt
+  - id: open_build_guide
+    method: GET
+    href: /build.html
+  - id: open_plugin_guide
+    method: GET
+    href: /plugin.html
+  - id: open_flasher
+    method: GET
+    href: /flash.html
+
+@context
+  > Familiar is an independent third-party desk companion for Hermes Agent.
+  > The canonical agent setup runbook is /agent.md. Do not invent hardware or business facts.
+  > Voice requires speaker hardware plus Wi-Fi on the same LAN as the Hermes gateway.
+
+@nav
+  self:      /index.agent
+  parents:   [/.agent]
+  peers:     [/build.agent, /plugin.agent, /flash.agent, /roadmap.agent]
+  drilldown: /agent.md

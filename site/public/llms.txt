@@ -1,0 +1,23 @@
+# Build a Familiar
+
+> Open ESP32-S3 desk companion for Hermes Agent: live state, tap-to-approve, programmable actions, LAN voice, and an agent-readable setup runbook.
+
+## Core pages
+
+- [Home](https://buildafamiliar.com/): Project overview and interactive screen demo.
+- [Build guide](https://buildafamiliar.com/build.html): Hardware bill of materials and assembly steps.
+- [Plugin guide](https://buildafamiliar.com/plugin.html): Hermes plugin install, host behavior, and verification.
+- [Browser flasher](https://buildafamiliar.com/flash.html): WebSerial firmware flashing page.
+- [Roadmap](https://buildafamiliar.com/roadmap.html): Shipped capabilities and upcoming work.
+
+## Agent surfaces
+
+- [Agent setup runbook](https://buildafamiliar.com/agent.md): Step-by-step setup contract for Hermes or another local AI agent.
+- [AVL manifest](https://buildafamiliar.com/agent.txt): Agent View Layer discovery manifest.
+- [Home agent view](https://buildafamiliar.com/.agent): Root text/agent-view companion document.
+- [Full LLM context](https://buildafamiliar.com/llms-full.txt): Single-file markdown context for the full static site.
+
+## Source
+
+- [Project repository](https://github.com/webdevtodayjason/hermes): Firmware, Hermes plugin, site, and docs. Private until first public release.
+- [Hermes Agent](https://github.com/NousResearch/hermes-agent): Agent platform that the Familiar plugin integrates with.
