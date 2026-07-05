@@ -19,6 +19,7 @@ import logging
 import os
 import signal
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -112,6 +113,8 @@ class JobManager:
         self.paused = False
         self.started_at = 0.0
         self.running_index = -1   # index into enabled actions, -1 = none
+        self._result: dict | None = None   # last finished job's captured output
+        self._out_buf = ""                  # drained live by the reader thread
 
     @staticmethod
     def _config_mtime() -> float:
@@ -135,8 +138,13 @@ class JobManager:
     # -- state -------------------------------------------------------------
 
     def status(self) -> dict:
-        """Job fields for the device state payload. Reaps finished jobs."""
+        """Job fields for the device state payload. Reaps finished jobs and
+        captures their output into ``self._result`` for the device to surface."""
         if self.proc is not None and self.proc.poll() is not None:
+            rc = self.proc.returncode
+            out = self._out_buf or ""   # drained by the reader thread — no pipe deadlock
+            self._result = {"label": self.label, "rc": rc,
+                            "text": compact(out, 300) or f"{self.label} done (rc={rc})"}
             self.proc = None
             self.paused = False
             self.running_index = -1
@@ -154,6 +162,26 @@ class JobManager:
     @property
     def active(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
+
+    def pop_result(self) -> dict | None:
+        """Return + clear the last finished job's captured output, or None."""
+        r, self._result = self._result, None
+        return r
+
+    def _start_reader(self, proc) -> None:
+        """Drain the job's combined stdout+stderr live so a chatty command
+        can never deadlock on a full pipe. Keeps only the tail we'll show."""
+        def _read():
+            buf = []
+            try:
+                for line in proc.stdout:
+                    buf.append(line)
+                    if len(buf) > 200:      # keep the tail; we only surface ~300 chars
+                        buf.pop(0)
+            except Exception:
+                pass
+            self._out_buf = "".join(buf)
+        threading.Thread(target=_read, name="familiar-job-out", daemon=True).start()
 
     # -- device commands -----------------------------------------------------
 
@@ -179,13 +207,15 @@ class JobManager:
         try:
             self.proc = subprocess.Popen(
                 cmd, text=True,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
             self.label = action.get("label", "Action")
             self.running_index = i
             self.paused = False
             self.started_at = time.time()
+            self._out_buf = ""
+            self._start_reader(self.proc)
             return {"type": "ack", "msg": f"started: {self.label}"}
         except Exception as e:
             return {"type": "ack", "msg": f"start failed: {compact(str(e), 60)}"}

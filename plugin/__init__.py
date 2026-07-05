@@ -168,6 +168,10 @@ def _maybe_push_pages() -> None:
     except Exception:
         logger.exception("familiar page feed failed")
     try:
+        _surface_job_result()
+    except Exception:
+        logger.exception("familiar job-result surfacing failed")
+    try:
         _loom_tick()
     except Exception:
         logger.exception("familiar loom bell failed")
@@ -175,6 +179,27 @@ def _maybe_push_pages() -> None:
         _ritual_tick()
     except Exception:
         logger.exception("familiar ritual failed")
+
+
+def _surface_job_result() -> None:
+    """When a deck job finishes, show its result on the ticker + banner, and
+    speak it if voice is on. Without this, button output would vanish."""
+    if _jobs is None:
+        return
+    res = _jobs.pop_result()
+    if not res:
+        return
+    label = res.get("label", "job")
+    text = _actions.compact(str(res.get("text") or ""), 140)
+    ok = res.get("rc", 0) == 0
+    stamp = datetime.now().strftime("%H:%M")
+    with _lock:
+        _entries.appendleft(f"{stamp} >{label}: {_actions.compact(text, 70)}")
+    _set_msg(f"[{label}] {text}")
+    _push({"type": "notify", "msg": f"{label}: {text}",
+           "sound": "ack" if ok else "alert"})
+    _say_async(text)
+    logger.info("deck result [%s] rc=%s: %s", label, res.get("rc"), text[:120])
 
 
 def _loom_tick() -> None:

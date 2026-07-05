@@ -175,6 +175,22 @@ def test_deck_hot_reloads_when_config_changes(monkeypatch, tmp_path):
     jm.cancel()
 
 
+def test_job_output_is_captured_and_popped():
+    import time as _t
+    jm = actions.JobManager([{"id":"e","label":"ECHO","enabled":True,
+                              "command":["/bin/echo","hello from the deck"]}])
+    jm.start_by_index(0)
+    deadline = _t.time() + 3
+    while jm.active and _t.time() < deadline:
+        _t.sleep(0.05)
+    jm.status()   # reaps the finished job, captures output
+    res = jm.pop_result()
+    assert res is not None
+    assert res["rc"] == 0
+    assert "hello from the deck" in res["text"]
+    assert jm.pop_result() is None   # cleared after pop
+
+
 def test_prompt_actions_become_hermes_chat_commands():
     cmd = actions._action_command({"prompt": "say hi"})
     assert cmd == ["hermes", "chat", "-q", "say hi"]
