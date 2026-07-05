@@ -119,6 +119,41 @@ def test_device_permission_with_no_pending_is_acked(wired):
     assert link.sent[-2]["msg"] == "no pending approval"
 
 
+def test_deck_frame_shapes_buttons():
+    frame = actions.deck_frame([
+        {"id": "a", "label": "morning brief", "enabled": True, "color": "cyan"},
+        {"id": "b", "label": "REDEPLOY SITE NOW", "enabled": True, "confirm": True, "color": "bogus"},
+        {"id": "c", "label": "off", "enabled": False},
+    ])
+    assert frame["type"] == "deck"
+    assert frame["buttons"] == [
+        {"i": 0, "label": "MORNING", "color": "cyan", "confirm": False},
+        {"i": 1, "label": "REDEPLOY", "color": "green", "confirm": True},
+    ]
+
+
+def test_deck_start_by_index_and_toggle_cancel():
+    jm = actions.JobManager([
+        {"id": "a", "label": "A", "enabled": True, "command": ["sleep", "5"]},
+        {"id": "b", "label": "B", "enabled": True, "prompt": "do the thing"},
+    ])
+    assert "no action 7" in jm.start_by_index(7)["msg"]
+    assert jm.start_by_index(0)["msg"] == "started: A"
+    assert jm.status()["job_index"] == 0
+    assert "busy" in jm.start_by_index(1)["msg"]          # one job at a time
+    assert jm.start_by_index(0)["msg"] == "job cancel sent"  # same button = stop
+    deadline = time.time() + 3
+    while jm.active and time.time() < deadline:
+        time.sleep(0.05)
+    assert jm.status()["job_index"] == -1
+
+
+def test_prompt_actions_become_hermes_chat_commands():
+    cmd = actions._action_command({"prompt": "say hi"})
+    assert cmd == ["hermes", "chat", "-q", "say hi"]
+    assert actions._action_command({"label": "empty"}) is None
+
+
 def test_job_manager_start_pause_cancel():
     jm = actions.JobManager([{"id": "t", "label": "Sleeper", "enabled": True,
                               "command": ["sleep", "5"]}])

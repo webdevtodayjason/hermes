@@ -240,6 +240,19 @@ struct HostPage {
 };
 static HostPage hostPages[2];
 
+// THE DECK: host-defined programmable buttons on the OPS tab (3x2 grid).
+// confirm-flagged buttons arm on first tap ("SURE?") and fire on the second.
+struct DeckButton {
+  String label;
+  uint8_t color = 0;      // 0 green, 1 amber, 2 red, 3 cyan
+  bool confirm = false;
+};
+static DeckButton deck[6];
+static uint8_t deckCount = 0;
+static int8_t deckArmed = -1;          // button awaiting its confirm tap
+static uint32_t deckArmedUntilMs = 0;  // arm window
+static int8_t jobIndex = -1;           // which deck button's job is running
+
 static uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) { return gfx->color565(r, g, b); }
 static uint16_t bswap565(uint16_t v) { return (uint16_t)((v << 8) | (v >> 8)); }
 // Calibrated from on-device photos: Page 5/8 was correct, meaning
@@ -997,20 +1010,43 @@ static void redraw() {
     } else {
       gfx->setTextColor(INK, BG);
       gfx->setCursor(8, CY + 6);
-      gfx->print("> OPS");
+      gfx->print("> THE DECK");
       gfx->setTextColor(DIM, BG);
       gfx->setCursor(8, CY + 22);
       String j = st.jobState + ": " + st.jobLabel;
       if (j.length() > 50) j = j.substring(0, 50);
       gfx->print(j);
-      const int16_t by = CY + 60, bh = 90, bw = 96;
-      const char* labels[3] = {"START", "PAUSE", "CANCEL"};
-      for (int i = 0; i < 3; ++i) {
-        int16_t bx = 8 + i * (bw + 8);
-        gfx->drawRoundRect(bx, by, bw, bh, 8, i == 0 ? GREEN : (i == 1 ? GOLD : RED));
-        gfx->setTextColor(i == 0 ? GREEN : (i == 1 ? GOLD : RED), BG);
-        gfx->setCursor(bx + (bw - (int16_t)strlen(labels[i]) * 6) / 2, by + bh / 2 - 4);
-        gfx->print(labels[i]);
+      if (deckCount == 0) {
+        gfx->setTextColor(DIM, BG);
+        gfx->setCursor(8, CY + 60);
+        gfx->print("no buttons from host yet");
+        gfx->setCursor(8, CY + 76);
+        gfx->print("configure ~/.hermes/familiar_actions.json");
+      } else {
+        // 3x2 grid; running button fills solid, armed button asks SURE?
+        const int16_t bw = 98, bh = 70, gx = 8, gy = 8;
+        static const uint16_t deckCol[4] = {GREEN, GOLD, RED, CYAN};
+        for (int i = 0; i < deckCount; ++i) {
+          int16_t bx = 8 + (i % 3) * (bw + gx);
+          int16_t by = CY + 38 + (i / 3) * (bh + gy);
+          uint16_t col = deckCol[deck[i].color & 3];
+          bool running = (jobIndex == i);
+          bool armed = (deckArmed == i && millis() < deckArmedUntilMs);
+          if (running) {
+            gfx->fillRoundRect(bx, by, bw, bh, 8, col);
+            gfx->setTextColor(BG, col);
+          } else {
+            gfx->drawRoundRect(bx, by, bw, bh, 8, armed ? GOLD : col);
+            gfx->setTextColor(armed ? GOLD : col, BG);
+          }
+          const char* txt = armed ? "SURE?" : deck[i].label.c_str();
+          int16_t tx2 = bx + (bw - (int16_t)strlen(txt) * 6) / 2;
+          gfx->setCursor(tx2 > bx ? tx2 : bx + 2, by + bh / 2 - 8);
+          gfx->print(txt);
+          gfx->setTextColor(running ? BG : DIM, running ? col : BG);
+          gfx->setCursor(bx + (bw - 6 * 4) / 2, by + bh / 2 + 6);
+          gfx->print(running ? "STOP" : (deck[i].confirm && !armed ? "2TAP" : "    "));
+        }
       }
     }
   } else if (uiPage == PAGE_CRON || uiPage == PAGE_NET) {
@@ -1103,15 +1139,33 @@ static void handleTap(uint16_t tx, uint16_t ty) {
     return;
   }
 
-  if (uiPage == PAGE_OPS && ty > TAB_H + 40) {
+  if (uiPage == PAGE_OPS && ty > TAB_H + 30) {
     if (st.action.active || st.waiting > 0) {
       const char* decision = tx < 160 ? "once" : "deny";
       sendPermissionDecision(decision);
       st.msg = String("decision: ") + decision;
-    } else {
-      const char* action = tx < 110 ? "start" : (tx < 214 ? "pause" : "cancel");
-      sendLine(String("{\"cmd\":\"action\",\"action\":\"") + action + "\"}");
-      st.msg = String("action: ") + action;
+      st.dirty = true;
+      return;
+    }
+    // deck grid hit-test (3x2, matches redraw geometry)
+    const int16_t bw = 98, bh = 70, gx = 8, gy = 8, y0 = TAB_H + 38;
+    int col = (tx - 8) / (bw + gx);
+    int row = (ty - y0) / (bh + gy);
+    if (col >= 0 && col < 3 && row >= 0 && row < 2 &&
+        (tx - 8) % (bw + gx) < bw && ty >= y0 && (ty - y0) % (bh + gy) < bh) {
+      int i = row * 3 + col;
+      if (i < deckCount) {
+        if (deck[i].confirm && jobIndex != i && deckArmed != i) {
+          deckArmed = i;                        // first tap arms
+          deckArmedUntilMs = millis() + 2500;
+          st.msg = deck[i].label + ": tap again";
+          chirp("tap");
+        } else {
+          deckArmed = -1;                       // fire (or stop the running one)
+          sendLine(String("{\"cmd\":\"deck\",\"i\":") + i + "}");
+          st.msg = String("deck: ") + deck[i].label;
+        }
+      }
     }
     st.dirty = true;
     return;
@@ -1204,6 +1258,25 @@ static void applyJsonLine(const String &line) {
     if (say[0]) startSay(say);
     return;
   }
+  if (doc["type"] == "deck") {
+    deckCount = 0;
+    if (doc["buttons"].is<JsonArray>()) {
+      for (JsonVariant b : doc["buttons"].as<JsonArray>()) {
+        if (deckCount >= 6) break;
+        DeckButton &d = deck[deckCount];
+        d.label = String((const char*)(b["label"] | "BTN"));
+        const char* c = b["color"] | "green";
+        d.color = !strcmp(c, "amber") ? 1 : (!strcmp(c, "red") ? 2 : (!strcmp(c, "cyan") ? 3 : 0));
+        d.confirm = b["confirm"] | false;
+        deckCount++;
+      }
+    }
+    deckArmed = -1;
+    st.connected = true;
+    st.lastSeenMs = millis();
+    st.dirty = true;
+    return;
+  }
   if (doc["type"] == "page") {
     int slot = doc["slot"] | 0;
     if (slot < 0 || slot > 1) slot = 0;
@@ -1279,6 +1352,7 @@ static void applyJsonLine(const String &line) {
   st.toolsToday = doc["tools_today"] | st.toolsToday;
   if (doc["job_state"].is<const char*>()) st.jobState = doc["job_state"].as<const char*>();
   if (doc["job_label"].is<const char*>()) st.jobLabel = doc["job_label"].as<const char*>();
+  jobIndex = (int8_t)(doc["job_index"] | (int)jobIndex);
   if (doc["msg"].is<const char*>()) st.msg = doc["msg"].as<const char*>();
   st.entryCount = 0;
   if (doc["entries"].is<JsonArray>()) {
@@ -1459,6 +1533,10 @@ void loop() {
 
   if (toastUntilMs && millis() >= toastUntilMs) {
     toastUntilMs = 0;
+    st.dirty = true;
+  }
+  if (deckArmed >= 0 && millis() >= deckArmedUntilMs) {
+    deckArmed = -1;   // arm window expired unanswered
     st.dirty = true;
   }
 

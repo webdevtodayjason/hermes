@@ -28,16 +28,45 @@ DEFAULT_ACTIONS = {
     "actions": [
         {
             "id": "status_brief",
-            "label": "Status brief",
+            "label": "BRIEF",
             "enabled": True,
-            "command": [
-                "hermes", "chat", "-q",
-                "Give me a concise current Hermes work/status brief. Include active "
-                "tasks, blockers, and next best action. Keep it under 120 words.",
-            ],
+            "color": "green",
+            "prompt": "Give me a concise current Hermes work/status brief. Include active "
+                      "tasks, blockers, and next best action. Keep it under 120 words.",
         },
     ],
 }
+
+_DECK_COLORS = ("green", "amber", "red", "cyan")
+
+
+def deck_frame(actions: list[dict]) -> dict:
+    """Device deck layout: up to 6 enabled actions -> OPS grid buttons.
+
+    Each button: {"i", "label" (<=8 chars), "color", "confirm"}.
+    """
+    buttons = []
+    for i, a in enumerate([a for a in actions if a.get("enabled")][:6]):
+        color = str(a.get("color", "green")).lower()
+        label = " ".join(str(a.get("label", f"BTN{i}")).split()).upper()[:8].strip()
+        buttons.append({
+            "i": i,
+            "label": label or f"BTN{i}",
+            "color": color if color in _DECK_COLORS else "green",
+            "confirm": bool(a.get("confirm")),
+        })
+    return {"type": "deck", "buttons": buttons}
+
+
+def _action_command(action: dict) -> list[str] | None:
+    """An action runs its explicit command, or its prompt via `hermes chat -q`."""
+    cmd = action.get("command")
+    if isinstance(cmd, list) and all(isinstance(x, str) for x in cmd):
+        return cmd
+    prompt = action.get("prompt")
+    if isinstance(prompt, str) and prompt.strip():
+        return ["hermes", "chat", "-q", prompt]
+    return None
 
 
 def config_path() -> Path:
@@ -81,6 +110,7 @@ class JobManager:
         self.label = ""
         self.paused = False
         self.started_at = 0.0
+        self.running_index = -1   # index into enabled actions, -1 = none
 
     # -- state -------------------------------------------------------------
 
@@ -89,13 +119,15 @@ class JobManager:
         if self.proc is not None and self.proc.poll() is not None:
             self.proc = None
             self.paused = False
+            self.running_index = -1
         if self.proc is None:
             enabled = [a for a in self.actions if a.get("enabled")]
             label = enabled[0].get("label", "No action") if enabled else "No enabled action"
-            return {"job_state": "idle", "job_label": label}
+            return {"job_state": "idle", "job_label": label, "job_index": -1}
         return {
             "job_state": "paused" if self.paused else "running",
             "job_label": self.label,
+            "job_index": self.running_index,
             "job_age": int(time.time() - self.started_at),
         }
 
@@ -106,16 +138,24 @@ class JobManager:
     # -- device commands -----------------------------------------------------
 
     def start_first_enabled(self) -> dict:
+        return self.start_by_index(0)
+
+    def start_by_index(self, i: int) -> dict:
+        """Deck button i (index into ENABLED actions). One job at a time;
+        pressing the running action's button again cancels it (toggle)."""
+        enabled = [a for a in self.actions if a.get("enabled")]
+        if not (0 <= i < len(enabled)):
+            return {"type": "ack", "msg": f"no action {i}"}
+        action = enabled[i]
         if self.active:
-            return {"type": "ack", "msg": f"job already {'paused' if self.paused else 'running'}"}
-        action = next((a for a in self.actions if a.get("enabled")), None)
-        if not action:
-            return {"type": "ack", "msg": "no enabled action"}
-        cmd = action.get("command")
+            if self.running_index == i:
+                return self.cancel()
+            return {"type": "ack", "msg": f"busy: {self.label}"}
+        cmd = _action_command(action)
         # ponytail: subprocess-only in plugin mode; cron_job/API action types are
         # the standalone bridge's job (scripts/hermes_serial_bridge.py --api-url).
-        if not (isinstance(cmd, list) and all(isinstance(x, str) for x in cmd)):
-            return {"type": "ack", "msg": "action has no command"}
+        if cmd is None:
+            return {"type": "ack", "msg": "action has no command or prompt"}
         try:
             self.proc = subprocess.Popen(
                 cmd, text=True,
@@ -123,6 +163,7 @@ class JobManager:
                 start_new_session=True,
             )
             self.label = action.get("label", "Action")
+            self.running_index = i
             self.paused = False
             self.started_at = time.time()
             return {"type": "ack", "msg": f"started: {self.label}"}

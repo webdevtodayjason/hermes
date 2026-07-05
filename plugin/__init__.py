@@ -161,6 +161,7 @@ def _maybe_push_pages() -> None:
     try:
         _link.send(_feeds.cron_page())
         _link.send(_feeds.vitals_page(_started["at"], _stats))
+        _link.send(_actions.deck_frame(_jobs.actions))
     except Exception:
         logger.exception("familiar page feed failed")
     try:
@@ -353,6 +354,21 @@ def _on_kanban_blocked(task_id="", reason="", **kw):
 
 def _handle_device_line(evt: dict) -> None:
     cmd = evt.get("cmd") or evt.get("event")
+    if cmd == "deck":
+        try:
+            i = int(evt.get("i", -1))
+        except (TypeError, ValueError):
+            i = -1
+        res = _jobs.start_by_index(i)
+        logger.info("deck: button %d -> %s", i, res.get("msg"))
+        _push(res)
+        return
+    if cmd == "hello" or "hello" in evt:
+        # device (re)booted — resend the deck layout
+        if _link is not None:
+            _link.send(_actions.deck_frame(_jobs.actions))
+        logger.info("device: %s", evt)
+        return
     if cmd == "action":
         action = evt.get("action")
         if action == "start":
