@@ -194,6 +194,7 @@ struct PendingAction {
   bool active = false;
   String id;
   String text;
+  String detail;    // the raw command behind the approval, host-compacted
   String choices[3];
   uint8_t choiceCount = 0;
 };
@@ -252,6 +253,12 @@ static uint8_t deckCount = 0;
 static int8_t deckArmed = -1;          // button awaiting its confirm tap
 static uint32_t deckArmedUntilMs = 0;  // arm window
 static int8_t jobIndex = -1;           // which deck button's job is running
+
+// MSGS scrollback: host keeps 40 lines; device pages a 5-line window.
+static String msgsLines[5];
+static uint8_t msgsCount = 0;
+static uint16_t msgsOff = 0;
+static uint16_t msgsTotal = 0;
 
 static uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) { return gfx->color565(r, g, b); }
 static uint16_t bswap565(uint16_t v) { return (uint16_t)((v << 8) | (v >> 8)); }
@@ -976,18 +983,25 @@ static void redraw() {
   }
 
   if (uiPage == PAGE_MSGS) {
+    bool scrolled = (msgsOff > 0 && msgsCount > 0);
     gfx->setTextColor(DIM, BG);
     gfx->setCursor(8, CY + 6);
-    gfx->print("> RECENT TRAFFIC (u you / a hermes / k kanban / L loom)");
+    if (scrolled) {
+      gfx->printf("> HISTORY [%u-%u/%u] swipe down = newer", msgsOff + 1,
+                  msgsOff + msgsCount, msgsTotal);
+    } else {
+      gfx->print("> RECENT TRAFFIC (swipe up = history)");
+    }
     int16_t y = CY + 22;
-    for (int i = 0; i < 5; ++i) {
-      if (i >= st.entryCount) break;
-      drawWrapped(st.entries[i], 8, y, 50, 2, i == 0 ? INK : GREEN);
-      y += (st.entries[i].length() > 50 ? 26 : 14);
+    int n = scrolled ? msgsCount : st.entryCount;
+    for (int i = 0; i < n; ++i) {
+      const String &line = scrolled ? msgsLines[i] : st.entries[i];
+      drawWrapped(line, 8, y, 50, 2, (!scrolled && i == 0) ? INK : GREEN);
+      y += (line.length() > 50 ? 26 : 14);
       gfx->drawFastHLine(8, y - 4, LW - 16, PANEL);
       if (y > LH - 24) break;
     }
-    if (st.entryCount == 0) {
+    if (n == 0) {
       gfx->setTextColor(DIM, BG);
       gfx->setCursor(8, CY + 30);
       gfx->print("no messages yet");
@@ -997,7 +1011,8 @@ static void redraw() {
       gfx->setTextColor(mood, BG);
       gfx->setCursor(8, CY + 6);
       gfx->print("> APPROVAL REQUIRED");
-      drawWrapped(st.action.active ? st.action.text : st.msg, 8, CY + 24, 50, 3, INK);
+      drawWrapped(st.action.active ? st.action.text : st.msg, 8, CY + 22, 50, 2, INK);
+      if (st.action.detail.length()) drawWrapped(st.action.detail, 8, CY + 50, 50, 2, DIM);
       const int16_t by = CY + 80, bh = 100;
       gfx->drawRoundRect(12, by, 140, bh, 8, GREEN);
       gfx->setTextSize(2);
@@ -1119,6 +1134,7 @@ static void goPage(int delta) {
   if (next < 0) next += PAGE_COUNT;
   uiPage = (UiPage)next;
   toastUntilMs = 0;   // navigating dismisses a banner
+  msgsOff = 0;        // and resets message history to the live tail
   st.msg = String("page ") + next;
   st.dirty = true;
 }
@@ -1277,6 +1293,21 @@ static void applyJsonLine(const String &line) {
     st.dirty = true;
     return;
   }
+  if (doc["type"] == "msgs") {
+    msgsCount = 0;
+    msgsOff = doc["off"] | 0;
+    msgsTotal = doc["total"] | 0;
+    if (doc["lines"].is<JsonArray>()) {
+      for (JsonVariant v : doc["lines"].as<JsonArray>()) {
+        if (msgsCount >= 5) break;
+        msgsLines[msgsCount++] = v.as<String>();
+      }
+    }
+    st.connected = true;
+    st.lastSeenMs = millis();
+    st.dirty = true;
+    return;
+  }
   if (doc["type"] == "page") {
     int slot = doc["slot"] | 0;
     if (slot < 0 || slot > 1) slot = 0;
@@ -1324,6 +1355,7 @@ static void applyJsonLine(const String &line) {
     st.action.active = true;
     st.action.id = doc["id"] | "";
     st.action.text = doc["text"] | "Hermes needs approval";
+    st.action.detail = String((const char*)(doc["detail"] | ""));
     st.action.choiceCount = 0;
     if (doc["choices"].is<JsonArray>()) {
       for (JsonVariant v : doc["choices"].as<JsonArray>()) {
@@ -1488,11 +1520,21 @@ void loop() {
     int dx = (int)touchLastX - (int)touchStartX;
     int dy = (int)touchLastY - (int)touchStartY;
     bool swipe = abs(dx) >= SWIPE_MIN_DX && abs(dy) <= SWIPE_MAX_DY;
+    bool vswipe = abs(dy) >= SWIPE_MIN_DX && abs(dx) <= SWIPE_MAX_DY;
     if (swipe) {
       // Finger moving left (negative dx) reveals the next page, like a phone carousel.
       goPage(dx < 0 ? 1 : -1);
       st.msg = dx < 0 ? "swipe: next" : "swipe: prev";
       sendLine(String("{\"cmd\":\"swipe\",\"dx\":") + dx + ",\"dy\":" + dy + "}");
+    } else if (vswipe && uiPage == PAGE_MSGS) {
+      // finger up (dy<0) digs into history; down returns toward live
+      int next = (dy < 0) ? (int)msgsOff + 5 : (int)msgsOff - 5;
+      if (next <= 0) {
+        msgsOff = 0;   // back to the live tail, no host round-trip
+        st.dirty = true;
+      } else {
+        sendLine(String("{\"cmd\":\"msgs\",\"off\":") + next + "}");
+      }
     } else if (millis() - touchStartMs < 1200) {
       handleTap(touchStartX, touchStartY);
     }

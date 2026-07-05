@@ -101,7 +101,7 @@ _STATS_REFRESH_SECS = 60.0
 _lock = threading.Lock()
 _turns: set[str] = set()                  # session_ids with an LLM call in flight
 _pending: OrderedDict[str, str] = OrderedDict()   # approval session_key -> text
-_entries: deque[str] = deque(maxlen=5)    # newest-first message ticker (page 1)
+_entries: deque[str] = deque(maxlen=40)   # newest-first ticker; device shows 5, scrollback pages the rest
 _msg = "Familiar linked to Hermes"
 _stats = {"total": 0, "tokens_today": 0, "tools_today": 0, "at": 0.0}
 
@@ -233,7 +233,7 @@ def _payload() -> dict:
             "running": running,
             "waiting": len(_pending),
             "msg": _msg,
-            "entries": list(_entries),
+            "entries": list(_entries)[:5],
             "tokens_today": _stats["tokens_today"],
             "tools_today": _stats["tools_today"],
             **jobs,
@@ -310,12 +310,13 @@ def _on_post_llm(assistant_response="", platform="", session_id="", **kw):
 
 
 def _on_pre_approval(command="", description="", session_key="", surface="", **kw):
-    text = _actions.compact(str(description or command or "Hermes needs approval"), 140)
+    text = _actions.compact(str(description or command or "Hermes needs approval"), 100)
+    detail = _actions.compact(str(command or ""), 190) if description and command else ""
     with _lock:
         _pending[str(session_key)] = text
     _set_msg(text)
     _push({"type": "permission", "id": str(session_key), "text": text,
-           "choices": ["once", "deny"]})
+           "detail": detail, "choices": ["once", "deny"]})
     _say_async(f"Hermes needs an approval: {text}", only_while_pending=str(session_key))
 
 
@@ -362,6 +363,19 @@ def _handle_device_line(evt: dict) -> None:
         res = _jobs.start_by_index(i)
         logger.info("deck: button %d -> %s", i, res.get("msg"))
         _push(res)
+        return
+    if cmd == "msgs":
+        try:
+            off = max(0, int(evt.get("off", 0)))
+        except (TypeError, ValueError):
+            off = 0
+        with _lock:
+            total = len(_entries)
+            off = min(off, max(0, total - 1))
+            lines = list(_entries)[off:off + 5]
+        if _link is not None:
+            _link.send({"type": "msgs", "off": off, "total": total,
+                        "lines": [_actions.compact(l, 80) for l in lines]})
         return
     if cmd == "hello" or "hello" in evt:
         # device (re)booted — resend the deck layout
