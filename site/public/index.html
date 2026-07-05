@@ -27,13 +27,72 @@
     <b>runs your actions from a button</b>, and — with a speaker — <b>talks</b>.</p>
   </header>
 
-  <div class="device" role="img" aria-label="mockup of the familiar's screen: FACE tab active, portrait area, vitals column">
-    <div class="d-tabs"><span class="on">FACE</span><span>MSGS</span><span>OPS</span><span>CRON</span><span>NET</span><span>DEV</span></div>
-    <div class="d-body">
-      <div class="d-face">⌐■_■</div>
-      <div class="d-vitals"><b>AWAKE</b>S 5<br>R 1<br>W 0<br><br><b>TOK</b>48k<br><b>USB</b>ok<br><b>NET</b>ok</div>
+  <div class="device" aria-label="interactive demo of the familiar's screen">
+    <div class="d-tabs" role="tablist">
+      <button class="on" role="tab" data-tab="face">FACE</button>
+      <button role="tab" data-tab="msgs">MSGS</button>
+      <button role="tab" data-tab="ops">OPS</button>
+      <button role="tab" data-tab="cron">CRON</button>
+      <button role="tab" data-tab="net">NET</button>
+      <button role="tab" data-tab="dev">DEV</button>
+    </div>
+    <div class="d-screen">
+      <div class="d-pane on" data-pane="face">
+        <div class="d-body">
+          <div class="d-face"><img src="face.gif" alt="Hermes Familiar animated face — a green phosphor portrait blinking and smiling" width="360"></div>
+          <div class="d-vitals"><b>AWAKE</b>S 5<br>R 1<br>W 0<br><br><b>TOK</b>48k<br><b>USB</b>ok<br><b>NET</b>ok</div>
+        </div>
+      </div>
+      <div class="d-pane" data-pane="msgs">
+        <div class="d-txt"><span class="d-h">&gt; RECENT TRAFFIC</span>
+10:41 <b>u:</b> ping my desk when the deploy is green
+10:41 <b>a:</b> on it — watching the pipeline now
+10:43 <b>k:</b> worker-2 claimed T-88 (migrate)
+10:44 <b>a:</b> deploy is green. site is live.
+10:44 <b>!:</b> DEPLOY finished — buildafamiliar.com 200</div>
+      </div>
+      <div class="d-pane" data-pane="ops">
+        <div class="d-deck">
+          <span class="db g">BRIEF</span><span class="db g">STANDUP</span><span class="db c">LOOM</span>
+          <span class="db c">INBOX</span><span class="db r">DEPLOY<i>2TAP</i></span><span class="db a">GONITE<i>2TAP</i></span>
+        </div>
+      </div>
+      <div class="d-pane" data-pane="cron">
+        <div class="d-txt"><span class="d-h">&gt; CRON: 2 ACTIVE</span>
+17:17 mail watcher            ok
+09:00 morning digest          ok
+—     nightly backup      next 02:00</div>
+      </div>
+      <div class="d-pane" data-pane="net">
+        <div class="d-txt"><span class="d-h">&gt; GATEWAY</span>
+up 6h04m   te:ok  sl:ok
+S:5  tools:41  tok:48k
+familiar  192.168.100.82  usb+wifi</div>
+      </div>
+      <div class="d-pane" data-pane="dev">
+        <div class="d-txt"><span class="d-h">&gt; DEVICE</span>
+SD:122024MB   TP:CST328
+BAT:3.98V   RTC:--
+WiFi:192.168.100.82
+rot:1   heap:211264
+swipe L/R or tap tabs to navigate</div>
+      </div>
     </div>
   </div>
+  <p class="hint">↑ tap the tabs — this is her actual screen</p>
+  <script>
+    (function () {
+      var tabs = document.querySelectorAll('.d-tabs button');
+      var panes = document.querySelectorAll('.d-pane');
+      tabs.forEach(function (t) {
+        t.addEventListener('click', function () {
+          var name = t.getAttribute('data-tab');
+          tabs.forEach(function (x) { x.classList.toggle('on', x === t); });
+          panes.forEach(function (p) { p.classList.toggle('on', p.getAttribute('data-pane') === name); });
+        });
+      });
+    })();
+  </script>
 
   <main>
     <section>
