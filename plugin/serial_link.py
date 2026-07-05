@@ -71,6 +71,10 @@ class SerialLink:
         self._net_clients: list = []
         self._net_lock = threading.Lock()
         self._last_net_beat = 0.0
+        # optional () -> list[dict]: snapshot frames pushed to each client on
+        # connect (deck layout, pending approvals, …) — broadcast only carries
+        # what happens AFTER a client joins
+        self.on_client = None
         self.port: str | None = None      # active port when connected
 
     # -- public ----------------------------------------------------------
@@ -131,6 +135,16 @@ class SerialLink:
         with self._net_lock:
             self._net_clients = [c for c in self._net_clients if c[1] is not sender]
 
+    def _send_welcome(self, sender) -> None:
+        cb = self.on_client
+        if not cb:
+            return
+        try:
+            for frame in cb() or []:
+                sender((json.dumps(frame, separators=(",", ":")) + "\n").encode())
+        except Exception:
+            logger.exception("familiar welcome push failed")
+
     def start_tcp(self, port: int, token: str | None = None):
         """Newline-JSON TCP listener. Returns the bound port, or None."""
         link = self
@@ -150,6 +164,7 @@ class SerialLink:
                 if token:
                     sender(b'{"type":"auth","ok":true}\n')
                 link._net_add("tcp", sender)
+                link._send_welcome(sender)
                 logger.info("familiar connected via tcp %s", peer)
                 try:
                     for raw in self.rfile:
@@ -213,6 +228,7 @@ class SerialLink:
                 conn.send(data.decode("utf-8"))
 
             link._net_add("ws", sender)
+            link._send_welcome(sender)
             logger.info("familiar connected via ws %s", peer)
             try:
                 for msg in conn:

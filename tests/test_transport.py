@@ -94,6 +94,20 @@ def test_tcp_auth_roundtrip():
     assert wait_for(lambda: not link._net_clients)
 
 
+def test_welcome_snapshot_on_connect():
+    # fresh clients get on_client() frames right after auth — the broadcast
+    # only carries what happens after they join
+    link, seen = make_link()
+    link.on_client = lambda: [{"type": "deck", "buttons": []}, {"type": "state"}]
+    port = link.start_tcp(0, token=TOKEN)
+    s = tcp_connect(port)
+    s.sendall(json.dumps({"type": "auth", "token": TOKEN}).encode() + b"\n")
+    assert json.loads(readline(s))["type"] == "auth"
+    assert json.loads(readline(s))["type"] == "deck"
+    assert json.loads(readline(s))["type"] == "state"
+    s.close()
+
+
 def test_tcp_no_token_is_open_backcompat():
     # device firmware pre-auth: no token configured -> old behavior
     link, seen = make_link()

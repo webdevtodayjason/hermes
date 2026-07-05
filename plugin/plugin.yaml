@@ -1,5 +1,5 @@
 name: familiar               # registry name; installs to ~/.hermes/plugins/familiar/
-version: "0.5.0"
+version: "0.5.1"
 manifest_version: 1
 description: "Hermes Familiar — ESP32-S3 desk companion driven live by gateway hooks over USB serial (state, tool activity, approvals, device-started actions)."
 author: "Titanium Computing"

@@ -634,6 +634,20 @@ def register(ctx) -> None:
             heartbeat=2.0,   # also the deck-result detection cadence (was 5s)
             make_heartbeat=_payload,
         )
+        def _welcome():
+            """Snapshot for a fresh network client (phone/PWA): the broadcast
+            only carries what happens after it joins, so hand it the deck,
+            any pending approvals, and current state up front."""
+            frames = [_actions.deck_frame(_jobs.actions if _jobs else [])]
+            with _lock:
+                pend = dict(_pending)
+            for key, text in pend.items():
+                frames.append({"type": "permission", "id": key, "text": text,
+                               "choices": ["once", "deny"]})
+            frames.append(_payload())
+            return frames
+
+        _link.on_client = _welcome
         _link.start()
         tcp_cfg = cfg.get("transport") or {}
         if tcp_cfg.get("enabled", True):
