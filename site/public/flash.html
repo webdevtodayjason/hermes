@@ -29,14 +29,28 @@
     <section>
       <div class="seclabel"><h2>Browser flasher</h2><div class="rule"></div></div>
       <div class="card">
-        <p><span class="chip soon">arriving with the first public release</span></p>
-        <p>The flasher goes live the moment firmware binaries publish to GitHub Releases —
-        it's <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a> pointed at
-        signed release builds, the same mechanism ESPHome uses for thousands of devices.
-        Until then, flashing works today from source:</p>
+        <p><span class="chip ok">live</span>&nbsp; Firmware <b>v0.4.0</b> · ESP32-S3 ·
+        flashes the full factory image (bootloader + app). Your settings live on the SD
+        card and over USB provisioning, so reflashing never loses them.</p>
+        <ul class="term">
+          <li>Use <b>Chrome or Edge</b> (WebSerial) — Safari and Firefox can't flash</li>
+          <li>Plug the board into <b>this computer</b> with a data-capable USB-C cable</li>
+          <li>Click, pick the serial port (usually <code>usbmodem…</code> / <code>COM…</code>), wait ~30 seconds</li>
+        </ul>
+        <p style="margin-top:14px">
+          <esp-web-install-button manifest="firmware/manifest.json">
+            <button slot="activate" style="font-family:inherit;background:#0c140d;color:#58e389;border:1px solid #58e389;padding:14px 26px;font-size:15px;letter-spacing:.12em;cursor:pointer;text-transform:uppercase;">
+              ⚡ Flash her now
+            </button>
+            <span slot="unsupported" style="color:#f0b64a">This browser can't flash — use Chrome or Edge.</span>
+            <span slot="not-allowed" style="color:#e5484d">WebSerial needs HTTPS — reload via https://buildafamiliar.com</span>
+          </esp-web-install-button>
+        </p>
+        <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+        <p>If the port never appears: hold the board's <b>BOOT</b> button while plugging in,
+        then try again. Prefer a toolchain? The source route still works:</p>
 <pre>git clone https://github.com/webdevtodayjason/hermes
-cd hermes
-pio run -t upload    # PlatformIO; board auto-detected on USB</pre>
+cd hermes &amp;&amp; pio run -t upload</pre>
       </div>
     </section>
 
