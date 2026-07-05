@@ -104,9 +104,27 @@ final class FamiliarModel: ObservableObject {
                 pages[slot] = Page(title: f["title"] as? String ?? "",
                                    lines: f["lines"] as? [String] ?? [])
             }
+        case "ack":
+            if let m = f["msg"] as? String { append(role: "·", text: m) }
         default:
             break
         }
+    }
+
+    // MARK: M2 — device→host frames (identical to the desk device's taps)
+
+    func runDeck(_ b: DeckButton) {
+        client.send(["cmd": "deck", "i": b.id])
+    }
+
+    func resolveApproval(_ decision: String) {
+        guard let a = approval else { return }
+        client.send(["cmd": "permission", "decision": decision, "id": a.id])
+        approval = nil   // optimistic — plugin acks and the next state frame confirms
+    }
+
+    func jobAction(_ action: String) {
+        client.send(["cmd": "action", "action": action])
     }
 
     private func append(role: String, text: String) {

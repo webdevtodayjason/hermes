@@ -27,3 +27,24 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.9"
         CODE_SIGN_STYLE: Automatic
+  PocketFamiliarUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - UITests
+    dependencies:
+      - target: PocketFamiliar
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  PocketFamiliar:
+    build:
+      targets:
+        PocketFamiliar: all
+        PocketFamiliarUITests: [test]
+    run:
+      config: Debug
+    test:
+      targets:
+        - PocketFamiliarUITests

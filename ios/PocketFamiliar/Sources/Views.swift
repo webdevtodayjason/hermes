@@ -19,6 +19,7 @@ struct ContentView: View {
         TabView(selection: $tab) {
             FaceView().tabItem { Label("Face", systemImage: "face.smiling") }.tag("face")
             FeedView().tabItem { Label("Feed", systemImage: "text.bubble") }.tag("feed")
+            DeckView().tabItem { Label("Ops", systemImage: "square.grid.3x2") }.tag("ops")
             SettingsView().tabItem { Label("Gateway", systemImage: "antenna.radiowaves.left.and.right") }.tag("gateway")
         }
         .tint(Phosphor.green)
@@ -90,11 +91,15 @@ struct FaceView: View {
     }
 
     private func approvalBanner(_ a: FamiliarModel.Approval) -> some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 10) {
             Text("⚠ APPROVAL PENDING").bold()
-            Text(a.text).lineLimit(3)
-            Text("resolve on the desk or CLI — phone resolve lands in M2")
-                .foregroundColor(Phosphor.dim)
+            Text(a.text).lineLimit(4)
+            HStack(spacing: 12) {
+                Button("ALLOW ONCE") { model.resolveApproval("once") }
+                    .buttonStyle(PhosphorButton(color: Phosphor.green))
+                Button("DENY") { model.resolveApproval("deny") }
+                    .buttonStyle(PhosphorButton(color: Phosphor.red, filled: true))
+            }
         }
         .font(.system(.footnote, design: .monospaced))
         .foregroundColor(Phosphor.red)
@@ -177,6 +182,106 @@ struct FeedView: View {
         case "u": return Phosphor.cyan
         case "!": return Phosphor.amber
         case "·": return Phosphor.dim
+        default: return Phosphor.green
+        }
+    }
+}
+
+// MARK: - Ops (deck + job control)
+
+struct PhosphorButton: ButtonStyle {
+    var color: Color
+    var filled = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(.footnote, design: .monospaced).bold())
+            .foregroundColor(filled ? Phosphor.bg : color)
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(filled ? color : .clear)
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(color, lineWidth: 1))
+            .opacity(configuration.isPressed ? 0.5 : 1)
+    }
+}
+
+struct DeckView: View {
+    @EnvironmentObject var model: FamiliarModel
+    @State private var fired: Int?
+
+    var body: some View {
+        ZStack {
+            Phosphor.bg.ignoresSafeArea()
+            VStack(spacing: 16) {
+                if model.deck.isEmpty {
+                    Spacer()
+                    Text("no deck yet — waiting for the gateway")
+                        .font(.system(.footnote, design: .monospaced))
+                        .foregroundColor(Phosphor.dim)
+                } else {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 2),
+                              spacing: 12) {
+                        ForEach(model.deck) { b in deckButton(b) }
+                    }
+                    .padding(.top, 8)
+                }
+                Spacer()
+                if model.jobState != "idle" { jobStrip }
+            }
+            .padding()
+        }
+    }
+
+    private func deckButton(_ b: FamiliarModel.DeckButton) -> some View {
+        let color = deckColor(b.color)
+        let label = VStack(spacing: 4) {
+            Text(b.label)
+                .font(.system(.body, design: .monospaced).bold())
+            Text(b.confirm ? "▸ hold to fire" : "tap")
+                .font(.system(size: 9, design: .monospaced))
+                .opacity(0.6)
+        }
+        .foregroundColor(color)
+        .frame(maxWidth: .infinity, minHeight: 72)
+        .background(fired == b.id ? color.opacity(0.25) : .clear)
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(color, lineWidth: b.confirm ? 2 : 1))
+        .contentShape(Rectangle())
+
+        return Group {
+            if b.confirm {
+                label.onLongPressGesture(minimumDuration: 0.8) { fire(b) }
+            } else {
+                label.onTapGesture { fire(b) }
+            }
+        }
+    }
+
+    private func fire(_ b: FamiliarModel.DeckButton) {
+        model.runDeck(b)
+        withAnimation(.easeOut(duration: 0.4)) { fired = b.id }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { fired = nil }
+    }
+
+    private var jobStrip: some View {
+        HStack {
+            Text("\(model.jobState.uppercased()) \(model.jobLabel)")
+                .font(.system(.footnote, design: .monospaced))
+                .foregroundColor(Phosphor.amber)
+                .lineLimit(1)
+            Spacer()
+            Button(model.jobState == "paused" ? "RESUME" : "PAUSE") { model.jobAction("pause") }
+                .buttonStyle(PhosphorButton(color: Phosphor.amber))
+            Button("CANCEL") { model.jobAction("cancel") }
+                .buttonStyle(PhosphorButton(color: Phosphor.red))
+        }
+        .padding(10)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Phosphor.amber.opacity(0.6), lineWidth: 1))
+    }
+
+    private func deckColor(_ name: String) -> Color {
+        switch name {
+        case "red": return Phosphor.red
+        case "amber": return Phosphor.amber
+        case "cyan": return Phosphor.cyan
         default: return Phosphor.green
         }
     }

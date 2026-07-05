@@ -22,12 +22,24 @@ The `-host/-port/-token` launch args land in `UserDefaults` (NSArgumentDomain)
 Gateway tab (tailnet IP `100.76.142.48`, token from `transport.token` in
 `~/.hermes/familiar_actions.json`).
 
+## UI tests (fake gateway loopback)
+
+```bash
+~/.hermes/hermes-agent/venv/bin/python ../../tests/fake_gateway.py 8999 &
+xcodebuild -project PocketFamiliar.xcodeproj -scheme PocketFamiliar \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath build test
+```
+
+The fake gateway pushes deck/permission frames and echoes every received cmd
+back as a notify, so the test asserts on screen what the app actually sent;
+its stdout logs the exact wire JSON.
+
 ## Layout
 
 - `Sources/FamiliarClient.swift` — WS client: auth-first-frame, decode, 3s reconnect, silence watchdog.
-- `Sources/FamiliarModel.swift` — observable mirror of gateway state (state/event/notify/deck/permission/page frames).
-- `Sources/Views.swift` — phosphor-terminal UI: Face (mood + vitals + approval banner), Feed, Gateway settings.
+- `Sources/FamiliarModel.swift` — observable mirror of gateway state (state/event/notify/deck/permission/page/ack frames) + send path (deck / permission resolve / job action).
+- `Sources/Views.swift` — phosphor-terminal UI: Face (mood + vitals + live ALLOW/DENY approval banner), Feed, Ops (deck grid with hold-to-confirm + job strip), Gateway settings.
 
-Milestones: M1 read-only viewer (this) → M2 send frames (deck, approvals) →
+Milestones: ~~M1 read-only viewer~~ → ~~M2 send frames (deck, approvals)~~ →
 M3 push + Live Activity → M4 QR pairing + TestFlight. Spec lives in the vault:
 `Hermes Familiar/Initiatives/Pocket Familiar - iOS App.md`.
