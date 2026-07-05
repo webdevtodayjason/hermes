@@ -204,7 +204,8 @@ def _ritual_tick() -> None:
 
     def _work():
         _refresh_stats()
-        material = _ritual.gather(now, _stats, _loom_cfg.get("board") or _loom.DEFAULT_BOARD)
+        material = _ritual.gather(now, _stats, _loom_cfg.get("board") or _loom.DEFAULT_BOARD,
+                                  closet=_ritual_cfg.get("closet"))
         llm = getattr(_ctx["ctx"], "llm", None) if _ctx.get("ctx") else None
         digest = _ritual.compose(material, llm=llm)
         logger.info("evening digest (%d chars): %s", len(digest), digest[:160])

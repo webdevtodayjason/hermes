@@ -68,9 +68,18 @@ Expected boot lines:
 
 ## Install as a Hermes plugin (recommended)
 
-The familiar is a native Hermes gateway plugin: hooks push live agent state to
-the device the moment it changes (no polling, no separate daemon), and the
-device's touch controls act on the real gateway.
+The familiar is a native third-party Hermes plugin, built entirely on the
+official plugin surface (`plugin.yaml` manifest v1, `register(ctx)`,
+`ctx.register_hook/tool/command`, trust-gated `ctx.llm`) — nothing patched,
+nothing forked. Any Hermes user installs it through the standard channel:
+
+```bash
+hermes plugins install webdevtodayjason/hermes/plugin --enable
+~/.hermes/hermes-agent/venv/bin/pip install pyserial   # the one python dep
+hermes gateway restart
+```
+
+From this working tree (development):
 
 ```bash
 ./install.sh          # pyserial into the gateway venv + hermes plugins install/enable

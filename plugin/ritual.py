@@ -50,7 +50,7 @@ def mark_done(now: datetime) -> None:
         logger.exception("ritual state save failed")
 
 
-def gather(now: datetime, stats: dict, board_dir: str) -> dict:
+def gather(now: datetime, stats: dict, board_dir: str, closet: str | None = None) -> dict:
     day = now.strftime("%Y-%m-%d")
     journal = []
     try:
@@ -61,7 +61,7 @@ def gather(now: datetime, stats: dict, board_dir: str) -> dict:
         pass
     filed, closed = [], 0
     try:
-        for line in CLOSET.read_text().splitlines():
+        for line in (Path(closet) if closet else CLOSET).read_text().splitlines():
             if f"(added {day})" not in line:
                 continue
             if line.lstrip().startswith("- [x]"):
