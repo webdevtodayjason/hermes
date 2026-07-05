@@ -405,8 +405,14 @@ def _handle_device_line(evt: dict) -> None:
                         "lines": [_actions.compact(l, 80) for l in lines]})
         return
     if cmd == "hello" or "hello" in evt:
-        # device (re)booted — resend the deck layout
+        # device (re)booted — teach it where home is (for untethered TCP
+        # reconnects) and resend the deck layout
         if _link is not None:
+            ip = _voice.lan_ip()
+            if ip:
+                tcp_cfg = _actions.load_config().get("transport") or {}
+                _link.send({"type": "config", "host": {
+                    "ip": ip, "port": int(tcp_cfg.get("port", 8767))}})
             _link.send(_actions.deck_frame(_jobs.actions))
         logger.info("device: %s", evt)
         return
@@ -557,7 +563,7 @@ def _slash_familiar(raw_args: str = "") -> str:
         return "familiar: banner + chirp sent"
     with _lock:
         pend = len(_pending)
-    port = _link.port if _link.connected else "searching…"
+    port = _link.transport if _link.connected else "searching…"
     jobs = _jobs.status() if _jobs else {}
     return (f"familiar: {'connected ' + str(port) if _link.connected else 'no device (' + str(port) + ')'}"
             f" | pending approvals: {pend}"
@@ -592,6 +598,9 @@ def register(ctx) -> None:
             make_heartbeat=_payload,
         )
         _link.start()
+        tcp_cfg = cfg.get("transport") or {}
+        if tcp_cfg.get("enabled", True):
+            _link.start_tcp(int(tcp_cfg.get("port", 8767)))
         logger.info("familiar serial link started (gateway process)")
 
     ctx.register_hook("on_session_start", _on_session_start)

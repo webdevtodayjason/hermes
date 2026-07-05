@@ -256,6 +256,17 @@ static int8_t deckArmed = -1;          // button awaiting its confirm tap
 static uint32_t deckArmedUntilMs = 0;  // arm window
 static int8_t jobIndex = -1;           // which deck button's job is running
 
+// Untethered: when USB goes silent and Wi-Fi is up, dial home over TCP
+// (same newline-JSON protocol). Host address provisioned over USB into
+// /hermes-buddy/config.json {"host":{"ip","port"}}.
+static String hostIp;
+static uint16_t hostPort = 8767;
+static WiFiClient tcpLink;
+static String tcpLine;
+static uint32_t lastTcpTryMs = 0;
+static uint32_t lastSerialRxMs = 0;   // bytes on USB specifically (TCP must not count)
+static bool backlightDim = false;
+
 // MSGS scrollback: host keeps 40 lines; device pages a 5-line window.
 static String msgsLines[5];
 static uint8_t msgsCount = 0;
@@ -873,6 +884,8 @@ static void loadDisplayConfigFromSD() {
   f.close();
   if (err) return;
   if (!doc["display"]["rotation"].isNull()) applyRotation((uint8_t)(doc["display"]["rotation"] | 1));
+  hostIp = String((const char*)(doc["host"]["ip"] | ""));
+  hostPort = doc["host"]["port"] | 8767;
 }
 
 static void initWiFiFromSD() {
@@ -1101,6 +1114,10 @@ static void redraw() {
 
 static void sendLine(const String &line) {
   Serial.println(line);
+  if (tcpLink.connected()) {
+    tcpLink.print(line);
+    tcpLink.print("\n");
+  }
   if (bleConnected && txChr) {
     txChr->setValue((uint8_t*)line.c_str(), line.length());
     txChr->notify();
@@ -1339,6 +1356,7 @@ static void applyJsonLine(const String &line) {
       }
       if (!doc["wifi"].isNull()) cfg["wifi"] = doc["wifi"];
       if (!doc["display"].isNull()) cfg["display"] = doc["display"];
+      if (!doc["host"].isNull()) cfg["host"] = doc["host"];
       File wf = SD_MMC.open("/hermes-buddy/config.json", FILE_WRITE);
       if (wf) {
         serializeJson(cfg, wf);
@@ -1351,6 +1369,10 @@ static void applyJsonLine(const String &line) {
     }
     sendLine(String("{\"ack\":\"config\",\"ok\":") + (ok ? "true" : "false") + ",\"detail\":\"" + why + "\"}");
     if (!doc["display"]["rotation"].isNull()) applyRotation((uint8_t)(doc["display"]["rotation"] | 1));
+    if (!doc["host"]["ip"].isNull()) {
+      hostIp = String((const char*)doc["host"]["ip"]);
+      hostPort = doc["host"]["port"] | 8767;
+    }
     if (ok && !doc["wifi"].isNull()) initWiFiFromSD();
     return;
   }
@@ -1486,6 +1508,7 @@ void loop() {
   }
 
   while (Serial.available()) {
+    lastSerialRxMs = millis();
     appendLineChar(serialLine, (char)Serial.read());
   }
 
@@ -1550,6 +1573,33 @@ void loop() {
 
   pollPeripheralSensors();
   if (wifiReady) httpServer.handleClient();
+
+  // Untethered leg: USB host silent + Wi-Fi up + home known -> dial home.
+  // Liveness keys off SERIAL bytes only — frames arriving over TCP must not
+  // convince us USB is back.
+  bool usbAlive = lastSerialRxMs != 0 && (millis() - lastSerialRxMs < 30000);
+  if (wifiReady && hostIp.length()) {
+    if (!tcpLink.connected() && !usbAlive && millis() - lastTcpTryMs > 10000) {
+      lastTcpTryMs = millis();
+      if (tcpLink.connect(hostIp.c_str(), hostPort)) {
+        tcpLine = "";
+        sendLine("{\"hello\":\"hermes-buddy\",\"transport\":\"tcp\"}");
+      }
+    }
+    while (tcpLink.connected() && tcpLink.available()) {
+      appendLineChar(tcpLine, (char)tcpLink.read());
+    }
+  }
+  if (tcpLink.connected() && usbAlive) tcpLink.stop();  // USB is back — one voice
+
+  // Battery discipline: dim after 10 min without touch or host activity.
+  bool idleDark = (millis() - st.lastTouchMs > 600000) &&
+                  (millis() - st.lastSeenMs > 600000 || !st.connected) &&
+                  st.running == 0 && st.waiting == 0;
+  if (idleDark != backlightDim) {
+    backlightDim = idleDark;
+    gfx->setBrightness(idleDark ? 30 : 185);
+  }
 
   if (st.connected && millis() - st.lastSeenMs > 30000) {
     st.connected = false;

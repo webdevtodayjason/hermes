@@ -22,6 +22,8 @@ import glob
 import json
 import logging
 import queue
+import socket
+import socketserver
 import subprocess
 import sys
 import threading
@@ -64,13 +66,24 @@ class SerialLink:
         self._warned_pyserial = False
         self._scan_fails = 0
         self._last_unwedge = 0.0
+        self._tcp_clients: list = []
+        self._tcp_lock = threading.Lock()
+        self._last_tcp_beat = 0.0
         self.port: str | None = None      # active port when connected
 
     # -- public ----------------------------------------------------------
 
     @property
     def connected(self) -> bool:
-        return self._ser is not None
+        return self._ser is not None or bool(self._tcp_clients)
+
+    @property
+    def transport(self) -> str:
+        if self._ser is not None:
+            return f"usb:{self.port}"
+        if self._tcp_clients:
+            return "tcp"
+        return "none" 
 
     def send(self, obj: dict) -> None:
         """Queue a frame for the device. Never blocks; drops oldest on overflow."""
@@ -89,6 +102,67 @@ class SerialLink:
     def start(self) -> None:
         atexit.register(self._drop)   # release the port with proper line-state on exit
         threading.Thread(target=self._run, name="familiar-serial", daemon=True).start()
+
+    # -- TCP leg (untethered mode) ---------------------------------------
+    # The device connects OUT to us when its USB host goes silent. Same
+    # newline-JSON protocol; send() prefers USB when both are up.
+
+    def start_tcp(self, port: int) -> None:
+        link = self
+
+        class _Handler(socketserver.StreamRequestHandler):
+            def handle(self):
+                peer = f"{self.client_address[0]}:{self.client_address[1]}"
+                with link._tcp_lock:
+                    link._tcp_clients.append(self.wfile)
+                logger.info("familiar connected via tcp %s", peer)
+                try:
+                    for raw in self.rfile:
+                        try:
+                            evt = json.loads(raw.decode("utf-8", "replace"))
+                        except Exception:
+                            continue
+                        if isinstance(evt, dict):
+                            try:
+                                link._on_line(evt)
+                            except Exception:
+                                logger.exception("familiar tcp on_line failed")
+                finally:
+                    with link._tcp_lock:
+                        try:
+                            link._tcp_clients.remove(self.wfile)
+                        except ValueError:
+                            pass
+                    logger.info("familiar tcp %s disconnected", peer)
+
+        class _Srv(socketserver.ThreadingTCPServer):
+            allow_reuse_address = True
+            daemon_threads = True
+
+        try:
+            srv = _Srv(("0.0.0.0", int(port)), _Handler)
+        except OSError as e:
+            logger.warning("familiar tcp port %s unavailable: %s", port, e)
+            return
+        threading.Thread(target=srv.serve_forever, name="familiar-tcp", daemon=True).start()
+        logger.info("familiar tcp transport listening on :%s", port)
+
+    def _tcp_send(self, data: bytes) -> bool:
+        with self._tcp_lock:
+            clients = list(self._tcp_clients)
+        sent = False
+        for w in clients:
+            try:
+                w.write(data)
+                w.flush()
+                sent = True
+            except Exception:
+                with self._tcp_lock:
+                    try:
+                        self._tcp_clients.remove(w)
+                    except ValueError:
+                        pass
+        return sent
 
     def _try_unwedge(self, port: str) -> None:
         """Hard-reset a present-but-deaf device via esptool (rate-limited)."""
@@ -202,13 +276,20 @@ class SerialLink:
             if self._ser is None:
                 self._connect()
                 if self._ser is None:
-                    # nothing plugged in — nap, but keep the queue from growing stale
+                    # no USB — drain the queue over TCP if the device dialed in
                     while not self._q.empty():
                         try:
-                            self._q.get_nowait()
+                            obj = self._q.get_nowait()
                         except queue.Empty:
                             break
-                    time.sleep(_RESCAN_SECS)
+                        self._tcp_send((json.dumps(obj, separators=(",", ":")) + "\n").encode())
+                    now = time.time()
+                    if self._make_heartbeat and self._tcp_clients and now - self._last_tcp_beat >= self._heartbeat:
+                        self._last_tcp_beat = now
+                        hb = self._make_heartbeat()
+                        if hb:
+                            self._tcp_send((json.dumps(hb, separators=(",", ":")) + "\n").encode())
+                    time.sleep(1.0 if self._tcp_clients else _RESCAN_SECS)
                     continue
                 buf = b""
                 last_beat = 0.0
