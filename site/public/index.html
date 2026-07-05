@@ -237,8 +237,17 @@ swipe L/R or tap tabs to navigate</div>
       <div class="seclabel"><h2>Agent handoff &amp; support</h2><div class="rule"></div></div>
       <div class="card">
         <p>Machine-readable surfaces are first-class here. Send your assistant to the exact route it needs, or open a support request in the project repo.</p>
+        <form class="handoff route-handoff" method="get" action="/agent.md" aria-label="Choose an agent handoff route">
+          <label for="handoff-route">Agent route</label>
+          <select id="handoff-route" name="route">
+            <option value="setup">Set up a flashed Familiar</option>
+            <option value="build">Understand the hardware build</option>
+            <option value="plugin">Install and verify the Hermes plugin</option>
+          </select>
+          <button type="submit">Open runbook</button>
+        </form>
         <p class="support-line"><b>Support/contact:</b> <a href="https://github.com/webdevtodayjason/hermes">GitHub repository</a> · <a href="https://github.com/webdevtodayjason/hermes/issues/new">open a support issue</a> · <a href="/agent.txt">AVL manifest</a></p>
-        <form class="handoff" method="get" action="https://github.com/webdevtodayjason/hermes/issues/new" aria-label="Contact Familiar support">
+        <form class="handoff support-form" method="get" action="https://github.com/webdevtodayjason/hermes/issues/new" aria-label="Contact Familiar support">
           <label for="contact-title">Support request</label>
           <input id="contact-title" name="title" type="text" value="Familiar support request" autocomplete="off">
           <label for="contact-body">Message</label>

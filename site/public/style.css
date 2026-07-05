@@ -150,7 +150,7 @@ footer a { color: var(--dim); }
 .handoff textarea { min-height: 96px; resize: vertical; }
 .handoff button { cursor: pointer; border-color: var(--ink); text-transform: uppercase; letter-spacing: .12em; width: fit-content; }
 .handoff button:hover { background: #0e1b10; }
-.support-line { color: var(--dim); }
+.support-line { color: var(--dim); margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--edge); }
 .avl-badge-wrap { margin-top: 14px; }
 .avl-badge { display: inline-flex; align-items: center; gap: 10px; color: var(--dim); text-decoration: none; }
 .avl-badge img { border: 1px solid var(--edge); background: #050805; }
