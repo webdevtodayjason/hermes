@@ -61,13 +61,15 @@
   <section>
     <div class="seclabel"><h2>Shipped</h2><div class="rule"></div></div>
     <div class="ledger">
-      <div class="ledger-row"><span class="ok">[ok]</span><span class="what"><b>Native third-party plugin</b> — official Hermes manifest, hooks, tool, slash command. <em>No forks, no gateway patches.</em></span></div>
-      <div class="ledger-row"><span class="ok">[ok]</span><span class="what"><b>Live nervous system</b> — agent state from every platform; tap-to-resolve real dangerous-command approvals, with pulse + chirp until answered.</span></div>
+      <div class="ledger-row"><span class="ok">[ok]</span><span class="what"><b>Native third-party plugin</b> — official Hermes manifest, hooks, tool, slash command, operator skill. <em>No forks, no gateway patches.</em></span></div>
+      <div class="ledger-row"><span class="ok">[ok]</span><span class="what"><b>Live nervous system</b> — agent state from every platform; tap-to-resolve real dangerous-command approvals (with the command shown), pulse + chirp until answered.</span></div>
       <div class="ledger-row"><span class="ok">[ok]</span><span class="what"><b>The agent can reach the desk</b> — a <code>familiar_notify</code> tool: banner, chirp, optional speech.</span></div>
-      <div class="ledger-row"><span class="ok">[ok]</span><span class="what"><b>Voice pipeline</b> — the gateway's own TTS config, streamed over LAN into the speaker.</span></div>
-      <div class="ledger-row"><span class="ok">[ok]</span><span class="what"><b>Evening ritual</b> — a daily spoken digest of everything the agents did, composed by the gateway's own model.</span></div>
+      <div class="ledger-row"><span class="ok">[ok]</span><span class="what"><b>THE DECK</b> — a grid of programmable buttons; each runs a script, a workflow, or a prompt, with a floating "working" pill and the result spoken + shown when it lands.</span></div>
+      <div class="ledger-row"><span class="ok">[ok]</span><span class="what"><b>The operator's console</b> — message scrollback, an approval detail view, and a fleet tab for background workers.</span></div>
+      <div class="ledger-row"><span class="ok">[ok]</span><span class="what"><b>Voice + presence</b> — the gateway's own TTS streamed to the speaker; volume, quiet hours, a nightly digest, and a morning greeting.</span></div>
+      <div class="ledger-row"><span class="ok">[ok]</span><span class="what"><b>Untethered</b> — runs over Wi-Fi when unplugged (auto-provisioned over USB — connect once, then cut the cord), with idle-dim battery discipline.</span></div>
       <div class="ledger-row"><span class="ok">[ok]</span><span class="what"><b>Pip-Boy landscape UI</b> — six tap/swipe tabs, vitals column, banner toasts, runtime rotation config.</span></div>
-      <div class="ledger-row"><span class="ok">[ok]</span><span class="what"><b>Browser flasher</b> — factory image flashed over WebSerial from this site, no toolchain.</span></div>
+      <div class="ledger-row"><span class="ok">[ok]</span><span class="what"><b>Browser flasher + agent-first setup</b> — flash the factory image over WebSerial from this site, then hand your agent <a href="agent.md"><code>agent.md</code></a> to finish setup.</span></div>
     </div>
   </section>
 
@@ -75,23 +77,13 @@
     <div class="seclabel"><h2>Phases</h2><div class="rule"></div></div>
 
     <div class="phase">
-      <div class="phase-head"><span class="num">PHASE 7</span><h3>Sound &amp; Presence</h3>
-        <span class="gate now">now</span></div>
-      <p class="thesis">The speaker era: make her sound good, not just loud.</p>
+      <div class="phase-head"><span class="num">NEXT</span><h3>Landscape-Native Art</h3>
+        <span class="gate next">building</span></div>
+      <p class="thesis">Today she wears portrait art adapted to the wide screen (the face
+      above is the source art). This phase designs her <i>for</i> the landscape:
+      full 320×240 scenes with the vitals column composed in. The artist spec is written.</p>
       <ul class="items">
-        <li><span><b>Volume &amp; quiet hours</b> — host-side gain and a do-not-chirp schedule</span></li>
-        <li><span><b>SD sound pack</b> — real chimes replacing the square-wave chirps</span></li>
-        <li><span><b>Morning greeting</b> — first touch of the day speaks the overnight: the evening ritual's mirror</span></li>
-      </ul>
-    </div>
-
-    <div class="phase">
-      <div class="phase-head"><span class="num">PHASE 8</span><h3>Landscape-Native Art</h3>
-        <span class="gate next">next</span></div>
-      <p class="thesis">Today she wears portrait art adapted to the wide screen. This phase designs
-      her for it: full 320×240 scenes with the vitals column composed in.</p>
-      <ul class="items">
-        <li><span><b>Artist canvas spec</b> — dimensions, safe zones, animation state sets, so anyone can draw her a new face</span></li>
+        <li><span><b>Artist canvas spec</b> — dimensions, safe zones, animation state sets, so anyone can draw her a new face &nbsp;<em>— done</em></span></li>
         <li><span><b>Landscape pack export</b> — the PNG→SD toolchain emits wide-format packs</span></li>
         <li><span><b>Boot splash</b> — a proper retro power-on sequence</span></li>
         <li><span><b>Procedural CRT life</b> — scanline drift, phosphor flicker, glitch transitions</span></li>
@@ -99,49 +91,36 @@
     </div>
 
     <div class="phase">
-      <div class="phase-head"><span class="num">PHASE 9</span><h3>The Operator's Console</h3>
-        <span class="gate next">next</span></div>
-      <p class="thesis">From "shows things" to "runs things".</p>
+      <div class="phase-head"><span class="num">NEXT</span><h3>Sound Pack</h3>
+        <span class="gate next">on the speaker</span></div>
+      <p class="thesis">Voice, volume, quiet hours, and the morning/evening digests are
+      already in. What's left is making the little sounds good.</p>
       <ul class="items">
-        <li><span><b>THE DECK</b> — a grid of programmable buttons: each one runs a script, a workflow, or fires a prompt at your agent. Labels, colors, hold-to-confirm for the dangerous ones</span></li>
-        <li><span><b>Message scrollback</b> — drag through deeper history</span></li>
-        <li><span><b>Approval detail view</b> — read the full command before you ALLOW</span></li>
-        <li><span><b>Fleet view</b> — background worker activity at a glance</span></li>
+        <li><span><b>SD sound pack</b> — real boot / alert / done chimes replacing the square-wave beeps</span></li>
+        <li><span><b>Swappable sound themes</b> — part of the pack format, shared on the exchange below</span></li>
       </ul>
     </div>
 
     <div class="phase">
-      <div class="phase-head"><span class="num">PHASE 10</span><h3>Untethered</h3>
-        <span class="gate later">later</span></div>
-      <p class="thesis">Cut the cord: battery in the case, transport over Wi-Fi, sit her anywhere.</p>
-      <ul class="items">
-        <li><span><b>WebSocket transport</b> — the full protocol over the network; USB becomes the fallback</span></li>
-        <li><span><b>Zero-config discovery</b> — the plugin finds her by name, no IPs</span></li>
-        <li><span><b>Power discipline</b> — backlight schedule, deep idle, honest battery telemetry</span></li>
-      </ul>
-    </div>
-
-    <div class="phase">
-      <div class="phase-head"><span class="num">PHASE 11</span><h3>Community</h3>
+      <div class="phase-head"><span class="num">NEXT</span><h3>Community</h3>
         <span class="gate now">in progress</span></div>
       <p class="thesis">Everything you need to build, flash, and dress your own familiar —
       from this site, with your agent's help.</p>
       <ul class="items">
-        <li><span><b>Browser flasher</b> — shipped, see <a href="flash.html">FLASH</a></span></li>
+        <li><span><b>Browser flasher + agent.md</b> — shipped, see <a href="flash.html">FLASH</a></span></li>
         <li><span><b>Printable case</b> — snap-fit landscape stand; CAD + Bambu 3MF land in the repo, with a print-on-demand option for the printerless</span></li>
         <li><span><b>PACK EXCHANGE</b> — community face &amp; sound packs: browse, download, submit your own. The pack format already exists; the exchange makes her a canvas</span></li>
-        <li><span><b>agent.md</b> — machine-readable setup so your Hermes installs its own body — shipped, <a href="agent.md">read it</a></span></li>
         <li><span><b>Public repo + demo mode</b> — runs standalone without a gateway, for the bench</span></li>
       </ul>
     </div>
 
     <div class="phase">
-      <div class="phase-head"><span class="num">PHASE 12</span><h3>Familiar Everywhere</h3>
+      <div class="phase-head"><span class="num">LATER</span><h3>Familiar Everywhere</h3>
         <span class="gate later">later</span></div>
-      <p class="thesis">Once the protocol speaks WebSocket, the "device" stops needing to be an
-      ESP32. The same plugin drives a second surface in your pocket.</p>
+      <p class="thesis">The transport is already networked, so the "device" no longer has to be
+      an ESP32. The same plugin can drive a second surface in your pocket.</p>
       <ul class="items">
-        <li><span><b>Phone PWA</b> — the same tabs, ticker, approvals, and deck, from anywhere</span></li>
+        <li><span><b>Phone app</b> — the same tabs, ticker, approvals, and deck, from anywhere</span></li>
         <li><span><b>Push notifications</b> — approvals reach you away from the desk</span></li>
         <li><span><b>Multi-familiar</b> — several devices, one gateway: desk, workshop, rack room</span></li>
       </ul>
