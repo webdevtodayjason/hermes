@@ -155,6 +155,13 @@ def _maybe_push_pages() -> None:
     bell, and the evening ritual (which offloads to its own thread)."""
     if _link is None:
         return
+    # Surface a finished deck job on EVERY tick (~5s heartbeat), not the 60s
+    # page timer — otherwise the result banner lags the button going off-green
+    # by up to a minute.
+    try:
+        _surface_job_result()
+    except Exception:
+        logger.exception("familiar job-result surfacing failed")
     now = time.time()
     if now - _pages["at"] < _PAGES_REFRESH_SECS:
         return
@@ -168,10 +175,6 @@ def _maybe_push_pages() -> None:
     except Exception:
         logger.exception("familiar page feed failed")
     try:
-        _surface_job_result()
-    except Exception:
-        logger.exception("familiar job-result surfacing failed")
-    try:
         _loom_tick()
     except Exception:
         logger.exception("familiar loom bell failed")
@@ -182,10 +185,14 @@ def _maybe_push_pages() -> None:
 
 
 def _surface_job_result() -> None:
-    """When a deck job finishes, show its result on the ticker + banner, and
-    speak it if voice is on. Without this, button output would vanish."""
-    if _jobs is None:
+    """Reap a finished deck job and surface its result the SAME tick it ends —
+    banner + ticker + speak — so the result lands together with the button
+    going off-green, not up to 60s later. Sends the notify DIRECTLY (never via
+    _push, which rebuilds the payload → would recurse from inside _payload).
+    The ticker entry rides the state frame _payload builds right after this."""
+    if _jobs is None or _link is None:
         return
+    _jobs.status()                 # reap now so job_index clears this same frame
     res = _jobs.pop_result()
     if not res:
         return
@@ -196,8 +203,8 @@ def _surface_job_result() -> None:
     with _lock:
         _entries.appendleft(f"{stamp} >{label}: {_actions.compact(text, 70)}")
     _set_msg(f"[{label}] {text}")
-    _push({"type": "notify", "msg": f"{label}: {text}",
-           "sound": "ack" if ok else "alert"})
+    _link.send({"type": "notify", "msg": f"{label}: {text}",
+                "sound": "ack" if ok else "alert"})
     _say_async(text)
     logger.info("deck result [%s] rc=%s: %s", label, res.get("rc"), text[:120])
 
@@ -620,7 +627,7 @@ def register(ctx) -> None:
             _handle_device_line,
             port=serial_cfg.get("port"),
             baud=int(serial_cfg.get("baud", 115200)),
-            heartbeat=5.0,
+            heartbeat=2.0,   # also the deck-result detection cadence (was 5s)
             make_heartbeat=_payload,
         )
         _link.start()

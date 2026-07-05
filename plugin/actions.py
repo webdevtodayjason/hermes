@@ -146,6 +146,7 @@ class JobManager:
         self.running_index = -1   # index into enabled actions, -1 = none
         self._result: dict | None = None   # last finished job's captured output
         self._out_buf = ""                  # drained live by the reader thread
+        self._reap_lock = threading.Lock()  # status()/pop_result may race across threads
 
     @staticmethod
     def _config_mtime() -> float:
@@ -170,15 +171,17 @@ class JobManager:
 
     def status(self) -> dict:
         """Job fields for the device state payload. Reaps finished jobs and
-        captures their output into ``self._result`` for the device to surface."""
-        if self.proc is not None and self.proc.poll() is not None:
-            rc = self.proc.returncode
-            out = self._out_buf or ""   # drained by the reader thread — no pipe deadlock
-            self._result = {"label": self.label, "rc": rc,
-                            "text": compact(clean_output(out), 300) or f"{self.label} done (rc={rc})"}
-            self.proc = None
-            self.paused = False
-            self.running_index = -1
+        captures their output into ``self._result`` for the device to surface.
+        Reap is locked — status() runs from both the heartbeat and hook threads."""
+        with self._reap_lock:
+            if self.proc is not None and self.proc.poll() is not None:
+                rc = self.proc.returncode
+                out = self._out_buf or ""   # drained by the reader thread — no pipe deadlock
+                self._result = {"label": self.label, "rc": rc,
+                                "text": compact(clean_output(out), 300) or f"{self.label} done (rc={rc})"}
+                self.proc = None
+                self.paused = False
+                self.running_index = -1
         if self.proc is None:
             enabled = [a for a in self.actions if a.get("enabled")]
             label = enabled[0].get("label", "No action") if enabled else "No enabled action"
@@ -195,8 +198,10 @@ class JobManager:
         return self.proc is not None and self.proc.poll() is None
 
     def pop_result(self) -> dict | None:
-        """Return + clear the last finished job's captured output, or None."""
-        r, self._result = self._result, None
+        """Return + clear the last finished job's captured output, or None.
+        Atomic so at most one racing caller surfaces a given result."""
+        with self._reap_lock:
+            r, self._result = self._result, None
         return r
 
     def _start_reader(self, proc) -> None:
