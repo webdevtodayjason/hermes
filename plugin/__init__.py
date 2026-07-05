@@ -51,6 +51,7 @@ logger = logging.getLogger("familiar")
 _started = {"at": time.time()}   # gateway (module load) time, for the vitals page
 _voice_enabled = True            # familiar_actions.json {"voice":{"enabled":false}} to kill
 _voice_port = 8765
+_voice_cfg: dict = {}            # full voice block: volume, quiet window, morning_after
 _loom_cfg: dict = {}             # familiar_actions.json {"loom":{"enabled":true,"board":...}}
 _ritual_cfg: dict = {}           # familiar_actions.json {"ritual":{"enabled":true,"time":"18:30"}}
 _ctx: dict = {}                  # {"ctx": PluginContext} — for ctx.llm in the ritual
@@ -194,6 +195,31 @@ def _loom_tick() -> None:
         _say_async(ev["text"])
     if not loud:
         _push()
+
+
+def _maybe_morning() -> None:
+    """First device touch of the day (after voice.morning_after, default 05:00)
+    speaks a good-morning brief — the evening ritual's mirror."""
+    if not _ritual_cfg.get("morning", True) or not _voice_enabled or _quiet_now():
+        return
+    now = datetime.now()
+    if not _ritual.morning_due(now, _voice_cfg.get("morning_after", "05:00")):
+        return
+    _ritual.mark_morning(now)
+
+    def _work():
+        _refresh_stats()
+        material = _ritual.gather(now, _stats, _loom_cfg.get("board") or _loom.DEFAULT_BOARD,
+                                  closet=_ritual_cfg.get("closet"))
+        llm = getattr(_ctx["ctx"], "llm", None) if _ctx.get("ctx") else None
+        digest = _ritual.compose(material, llm=llm, mood="morning")
+        logger.info("morning greeting (%d chars): %s", len(digest), digest[:120])
+        _push({"type": "notify", "msg": "Good morning", "sound": "none"})
+        url = _say_url(digest)
+        if url and _link is not None:
+            _link.send({"type": "say", "url": url})
+
+    threading.Thread(target=_work, name="familiar-morning", daemon=True).start()
 
 
 def _ritual_tick() -> None:
@@ -410,6 +436,9 @@ def _handle_device_line(evt: dict) -> None:
         # post_approval_response pops _pending and pushes fresh state
         _push({"type": "ack", "msg": f"sent: {decision}" if n else "approval already resolved"})
         return
+    if cmd == "touch":
+        _maybe_morning()
+        return
     if cmd == "gesture" and evt.get("gesture") == "shake":
         _push({"type": "event", "event": "gesture", "msg": "shake — Familiar is awake"})
         return
@@ -424,9 +453,27 @@ def _handle_device_line(evt: dict) -> None:
 # registration
 # --------------------------------------------------------------------------
 
+def _quiet_now() -> bool:
+    """True inside the configured quiet window (voice.quiet: ["22:00","07:00"]),
+    which may cross midnight. No window configured = never quiet."""
+    win = (_voice_cfg.get("quiet") or [])
+    if not (isinstance(win, (list, tuple)) and len(win) == 2):
+        return False
+    try:
+        s = tuple(int(x) for x in str(win[0]).split(":", 1))
+        e = tuple(int(x) for x in str(win[1]).split(":", 1))
+    except (TypeError, ValueError):
+        return False
+    now = datetime.now()
+    cur = (now.hour, now.minute)
+    if s <= e:
+        return s <= cur < e
+    return cur >= s or cur < e
+
+
 def _say_url(text: str) -> str | None:
-    """Best-effort TTS clip URL; None when voice is off/unavailable."""
-    if not _voice_enabled:
+    """Best-effort TTS clip URL; None when voice is off/unavailable/quiet."""
+    if not _voice_enabled or _quiet_now():
         return None
     try:
         return _voice.say_url(text, port=_voice_port)
@@ -476,6 +523,8 @@ def _tool_notify(args=None, **kw) -> str:
     sound = args.get("sound", "alert")
     if sound not in ("alert", "ack", "tap", "none"):
         sound = "alert"
+    if _quiet_now():
+        sound = "none"   # quiet hours: banner still lands, silently
     frame = {"type": "notify", "msg": msg, "sound": sound}
     spoke = False
     if args.get("speak"):
@@ -527,6 +576,8 @@ def register(ctx) -> None:
     vc = cfg.get("voice") or {}
     _voice_enabled = bool(vc.get("enabled", True))
     _voice_port = int(vc.get("port", 8765))
+    _voice_cfg.update(vc)
+    _voice.set_volume(vc.get("volume", 1.0))
     _loom_cfg.update(cfg.get("loom") or {})
     _ritual_cfg.update(cfg.get("ritual") or {})
     _ctx["ctx"] = ctx

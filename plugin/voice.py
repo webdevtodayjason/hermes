@@ -12,6 +12,7 @@ Wi-Fi → banners and chirps still work, speech is skipped.
 """
 from __future__ import annotations
 
+import array
 import functools
 import http.server
 import json
@@ -28,6 +29,16 @@ logger = logging.getLogger("familiar.voice")
 
 _PORT = 8765
 _MAX_FILES = 40
+_volume = 1.0
+
+
+def set_volume(v) -> None:
+    """0.0..1.0 host-side gain applied to every rendered clip."""
+    global _volume
+    try:
+        _volume = min(1.0, max(0.0, float(v)))
+    except (TypeError, ValueError):
+        _volume = 1.0
 _serve_dir: Path | None = None
 _server_ok = False
 
@@ -111,6 +122,12 @@ def _to_pcm16k(src: Path) -> Path | None:
             check=True, capture_output=True, timeout=30)
         with wave.open(str(wav), "rb") as w:
             frames = w.readframes(w.getnframes())
+        if _volume < 0.999:
+            samples = array.array("h")
+            samples.frombytes(frames)
+            for i in range(len(samples)):
+                samples[i] = int(samples[i] * _volume)
+            frames = samples.tobytes()
         pcm = src.with_suffix(".pcm")
         pcm.write_bytes(frames)
         return pcm

@@ -103,6 +103,35 @@ def test_fleet_page_reads_kanban(monkeypatch, tmp_path):
     assert "w1: fix the widget" in page["lines"][1]
 
 
+def test_morning_due_independent_of_evening(board):
+    now = datetime(2026, 7, 5, 8, 0)
+    assert ritual.morning_due(now, "05:00") is True
+    ritual.mark_morning(now)
+    assert ritual.morning_due(now, "05:00") is False
+    assert ritual.due(datetime(2026, 7, 5, 19, 0), "18:30") is True  # evening unaffected
+    assert ritual.morning_due(datetime(2026, 7, 6, 4, 0), "05:00") is False  # too early
+    assert ritual.morning_due(datetime(2026, 7, 6, 5, 1), "05:00") is True
+
+
+def test_quiet_window_crossing_midnight(monkeypatch):
+    import plugin as familiar
+    monkeypatch.setitem(familiar._voice_cfg, "quiet", ["22:00", "07:00"])
+    from datetime import datetime as dt
+    class FakeDT:
+        @staticmethod
+        def now():
+            return dt(2026, 7, 5, 23, 30)
+    monkeypatch.setattr(familiar, "datetime", FakeDT)
+    assert familiar._quiet_now() is True
+    class FakeDT2:
+        @staticmethod
+        def now():
+            return dt(2026, 7, 5, 12, 0)
+    monkeypatch.setattr(familiar, "datetime", FakeDT2)
+    assert familiar._quiet_now() is False
+    familiar._voice_cfg.pop("quiet", None)
+
+
 def test_fleet_page_no_db(monkeypatch, tmp_path):
     from plugin import feeds
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))

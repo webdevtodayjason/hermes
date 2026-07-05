@@ -50,6 +50,34 @@ def mark_done(now: datetime) -> None:
         logger.exception("ritual state save failed")
 
 
+def morning_due(now: datetime, after: str = "05:00") -> bool:
+    """True once per day, at/after `after`, gated separately from the evening."""
+    try:
+        hh, mm = (int(x) for x in str(after).split(":", 1))
+    except Exception:
+        hh, mm = 5, 0
+    if (now.hour, now.minute) < (hh, mm):
+        return False
+    try:
+        last = json.loads(_state_path().read_text()).get("morning_last", "")
+    except Exception:
+        last = ""
+    return last != now.strftime("%Y-%m-%d")
+
+
+def mark_morning(now: datetime) -> None:
+    try:
+        state = {}
+        try:
+            state = json.loads(_state_path().read_text())
+        except Exception:
+            pass
+        state["morning_last"] = now.strftime("%Y-%m-%d")
+        _state_path().write_text(json.dumps(state))
+    except Exception:
+        logger.exception("morning state save failed")
+
+
 def gather(now: datetime, stats: dict, board_dir: str, closet: str | None = None) -> dict:
     day = now.strftime("%Y-%m-%d")
     journal = []
@@ -82,19 +110,29 @@ def gather(now: datetime, stats: dict, board_dir: str, closet: str | None = None
     }
 
 
-def compose(material: dict, llm=None) -> str:
+_SYSTEM = {
+    "evening": (
+        "You are the evening voice of a desk familiar — a small companion device. "
+        "Compose the day's digest to be SPOKEN aloud: under 90 words, plain "
+        "sentences, no markdown, no lists. Warm, concrete, zero filler. Cover: "
+        "what shipped/landed today, what's blocked or waiting on the operator, "
+        "and what tomorrow inherits. If the day was quiet, say so briefly."),
+    "morning": (
+        "You are the morning voice of a desk familiar — a small companion device. "
+        "The operator just sat down. Compose a good-morning brief to be SPOKEN "
+        "aloud: under 70 words, plain sentences, no markdown. Lead with anything "
+        "that happened overnight or is waiting on them, then what today inherits. "
+        "If nothing happened, a one-line good morning is perfect."),
+}
+
+
+def compose(material: dict, llm=None, mood: str = "evening") -> str:
     """LLM digest when the host offers one; honest template otherwise."""
     if llm is not None:
         try:
             res = llm.complete(
                 [
-                    {"role": "system", "content": (
-                        "You are the evening voice of Jason's desk familiar — a small "
-                        "companion device. Compose the day's digest to be SPOKEN aloud: "
-                        "under 90 words, plain sentences, no markdown, no lists. Warm, "
-                        "concrete, zero filler. Cover: what shipped/landed today, what's "
-                        "blocked or waiting on Jason, and what tomorrow inherits. If the "
-                        "day was quiet, say so briefly.")},
+                    {"role": "system", "content": _SYSTEM.get(mood, _SYSTEM["evening"])},
                     {"role": "user", "content": json.dumps(material, indent=1)},
                 ],
                 max_tokens=400,
