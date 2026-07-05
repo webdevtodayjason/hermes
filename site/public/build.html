@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Build — hardware guide &amp; bill of materials</title>
+<meta name="description" content="Everything you need to build a Hermes Familiar: parts list, assembly, SD card, speaker, and the printable case.">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📟</text></svg>">
+</head>
+<body>
+<div class="crt">
+  <nav aria-label="site">
+    <a href="/">FACE</a>
+    <a href="build.html" aria-current="page">BUILD</a>
+    <a href="plugin.html">PLUGIN</a>
+    <a href="flash.html">FLASH</a>
+    <a href="roadmap.html">ROADMAP</a>
+  </nav>
+  <header class="hero">
+    <div class="sysline">hardware // bill of materials // assembly</div>
+    <h1>THE BUILD</h1>
+    <p class="sub">One dev board does almost everything — screen, touch, Wi-Fi, BLE, SD,
+    audio amp — so the "build" is closer to assembly than electronics. No soldering.</p>
+  </header>
+
+  <main>
+    <section>
+      <div class="seclabel"><h2>Bill of materials</h2><div class="rule"></div></div>
+      <div class="card">
+        <div class="tablewrap">
+        <table>
+          <tr><th>Part</th><th>Spec</th><th>~Cost</th><th>Where</th></tr>
+          <tr><td><b>Waveshare ESP32-S3-Touch-LCD-2.8</b></td><td>ST7789 240×320 IPS · 5-pt CST328 touch · I2S amp + volume dial · SD slot · Wi-Fi/BLE · <b>speakers included in the kit</b></td><td>$35</td><td><a href="https://a.co/d/0hfFtleT">amazon</a> · <a href="https://www.waveshare.com/esp32-s3-touch-lcd-2.8.htm">waveshare</a></td></tr>
+          <tr><td><b>Battery</b> (optional)</td><td>MakerFocus 3.7V 2000 mAh 1S LiPo (103450) w/ protection board, JST 1.25 — fits under the board inside the case</td><td>$22 / 4-pack</td><td><a href="https://a.co/d/09E84W3M">amazon</a></td></tr>
+          <tr><td><b>microSD card</b></td><td>any 8 GB+, formatted FAT32 (128 GB tested)</td><td>$6</td><td>anywhere</td></tr>
+          <tr><td><b>Brass standoffs + M2.5 bolts</b></td><td>4× standoffs raise the board for battery clearance; M2.5 bolts secure the case bottom</td><td>$8</td><td>amazon link soon</td></tr>
+          <tr><td><b>USB-C cable</b></td><td>data-capable, to your gateway machine</td><td>—</td><td>your drawer</td></tr>
+          <tr><td><b>Case</b> <span class="chip soon">coming</span></td><td>snap-fit 3D-printable landscape stand — CAD + Bambu 3MF will live in the repo. No printer? A print-on-demand button is planned</td><td>filament</td><td>this site</td></tr>
+        </table>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="seclabel"><h2>Assembly</h2><div class="rule"></div></div>
+      <div class="card">
+        <ul class="term">
+          <li><b>1. Flash the firmware</b> — from your browser on the <a href="flash.html">FLASH</a> page (WebSerial, Chrome/Edge), or with PlatformIO from the repo</li>
+          <li><b>2. Load the SD card</b> — copy the <code>hermes-buddy/</code> asset pack (face animations, sounds) to a FAT32 card, insert</li>
+          <li><b>3. Plug a speaker</b> — the kit's included speaker goes straight into the board's speaker jack; set the on-board volume dial to taste</li>
+          <li><b>4. Battery (optional)</b> — the LiPo plugs into the BAT connector and tucks under the board; four brass standoffs give it clearance inside the case</li>
+          <li><b>5. Case</b> — snap-fit print, M2.5 bolts on the bottom</li>
+          <li><b>6. USB into your gateway machine</b> — the plugin finds her automatically on any port</li>
+          <li><b>7. Install the plugin</b> — one command, see <a href="plugin.html">PLUGIN</a>; Wi-Fi credentials are provisioned over USB, no SD editing</li>
+        </ul>
+        <p>Orientation: she sits landscape, USB exiting to the side. If the screen comes up
+        inverted for your stand, rotation is a one-line config over USB — never a reflash.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="seclabel"><h2>The board, briefly</h2><div class="rule"></div></div>
+      <div class="card">
+        <p>ESP32-S3 (240 MHz dual-core, 8 MB flash), 2.8" IPS at 240×320 driven through LovyanGFX,
+        CST328 capacitive touch, I2S mono amplifier to the speaker jack, SD over SDMMC, native
+        USB-CDC serial. The familiar uses USB as its control channel and Wi-Fi only to pull
+        audio — so it works fully even on a network-less bench, just silently.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Familiar is an independent third-party project for the Hermes agent platform.
+    // MIT licensed // <a href="https://github.com/webdevtodayjason/hermes">github</a>
+  </footer>
+</div>
+</body>
+</html>

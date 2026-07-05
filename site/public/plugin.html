@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plugin — install the familiar into Hermes</title>
+<meta name="description" content="The familiar's host software is a native third-party Hermes plugin: one install command, no forks, no patches.">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📟</text></svg>">
+</head>
+<body>
+<div class="crt">
+  <nav aria-label="site">
+    <a href="/">FACE</a>
+    <a href="build.html">BUILD</a>
+    <a href="plugin.html" aria-current="page">PLUGIN</a>
+    <a href="flash.html">FLASH</a>
+    <a href="roadmap.html">ROADMAP</a>
+  </nav>
+  <header class="hero">
+    <div class="sysline">software // native hermes plugin // official surface only</div>
+    <h1>THE PLUGIN</h1>
+    <p class="sub">Everything on the host side is a standard third-party
+    <a href="https://github.com/NousResearch/hermes-agent">Hermes</a> plugin — manifest,
+    hook registration, a registered tool, a slash command. <b>No gateway patches, no forks.</b>
+    It lives inside your always-on gateway process: no daemon, no polling.</p>
+  </header>
+
+  <main>
+    <section>
+      <div class="seclabel"><h2>Install</h2><div class="rule"></div></div>
+      <div class="card">
+<pre>hermes plugins install webdevtodayjason/hermes/plugin --enable
+~/.hermes/hermes-agent/venv/bin/pip install pyserial
+hermes gateway restart</pre>
+        <p>Plug the familiar into any USB port — she's found automatically and survives
+        unplug/replug. <code>/familiar</code> in any Hermes chat shows link status;
+        <code>/familiar say hello</code> is the ten-second voice test.</p>
+        <p><span class="chip soon">note</span>&nbsp; The repo goes public with the first release —
+        until then this command works for collaborators only.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="seclabel"><h2>What it wires up</h2><div class="rule"></div></div>
+      <div class="card">
+        <div class="tablewrap">
+        <table>
+          <tr><th>Gateway event</th><th>On the device</th></tr>
+          <tr><td>agent thinking / using tools</td><td>portrait animates, activity label ("searching the web…")</td></tr>
+          <tr><td>reply sent (any platform)</td><td>message ticker + banner toast on any tab</td></tr>
+          <tr><td>dangerous-command approval pending</td><td>ALLOW / DENY takeover, pulse + chirp until answered — <b>your tap resolves the real approval</b></td></tr>
+          <tr><td>agent calls <code>familiar_notify</code></td><td>banner + chirp, optionally spoken aloud</td></tr>
+          <tr><td>kanban task claimed / done / blocked</td><td>ticker; blocked tasks alert the desk</td></tr>
+          <tr><td>daily at 18:30 (configurable)</td><td>the <b>evening ritual</b>: a spoken digest of the day, composed by your own model</td></tr>
+        </table>
+        </div>
+        <p>Voice uses your gateway's own TTS config (ElevenLabs, OpenAI, Edge — whatever you run);
+        audio streams over your LAN to her speaker. Configuration lives in
+        <code>~/.hermes/familiar_actions.json</code> — action buttons, voice, quiet options,
+        all documented in the repo.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="seclabel"><h2>Let your agent do this</h2><div class="rule"></div></div>
+      <div class="card">
+        <p>The entire setup is encoded machine-readably at
+        <a href="agent.md"><code>/agent.md</code></a>. Flash her on the
+        <a href="flash.html">FLASH</a> page, plug her in, then tell your Hermes:</p>
+        <pre>Set up my familiar. Follow https://buildafamiliar.com/agent.md</pre>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Familiar is an independent third-party project for the Hermes agent platform.
+    // MIT licensed // <a href="https://github.com/webdevtodayjason/hermes">github</a>
+  </footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Build a Familiar — a desk companion for your Hermes agent</title>
+<meta name="description" content="An open ESP32-S3 desk companion for the Hermes agent platform: live agent state, tap-to-approve, a voice, and a green phosphor soul. Build one.">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📟</text></svg>">
+</head>
+<body>
+<div class="crt">
+  <nav aria-label="site">
+    <a href="/" aria-current="page">FACE</a>
+    <a href="build.html">BUILD</a>
+    <a href="plugin.html">PLUGIN</a>
+    <a href="flash.html">FLASH</a>
+    <a href="roadmap.html">ROADMAP</a>
+  </nav>
+  <header class="hero">
+    <div class="sysline">hermes familiar // an open desk companion // third-party hermes plugin</div>
+    <h1>BUILD A FAMILIAR<span class="cursor"></span></h1>
+    <p class="sub">Your Hermes agent works all day — in chats, in cron jobs, in worker fleets —
+    and all of it is invisible. A <b>familiar</b> is a small green-phosphor creature that sits on
+    your desk and gives that workforce a body: it <b>shows what the agent is doing</b> the moment
+    it happens, <b>pulses when an approval needs you</b> (tap ALLOW right on the screen),
+    <b>runs your actions from a button</b>, and — with a speaker — <b>talks</b>.</p>
+  </header>
+
+  <div class="device" role="img" aria-label="mockup of the familiar's screen: FACE tab active, portrait area, vitals column">
+    <div class="d-tabs"><span class="on">FACE</span><span>MSGS</span><span>OPS</span><span>CRON</span><span>NET</span><span>DEV</span></div>
+    <div class="d-body">
+      <div class="d-face">⌐■_■</div>
+      <div class="d-vitals"><b>AWAKE</b>S 5<br>R 1<br>W 0<br><br><b>TOK</b>48k<br><b>USB</b>ok<br><b>NET</b>ok</div>
+    </div>
+  </div>
+
+  <main>
+    <section>
+      <div class="seclabel"><h2>What she does</h2><div class="rule"></div></div>
+      <div class="card">
+        <ul class="term">
+          <li><b>Live state</b> — thinking, tool activity, replies, across every platform your gateway serves (Telegram, Slack, cron, kanban workers)</li>
+          <li><b>Real approvals</b> — when the agent blocks on a dangerous command, she pulses and chirps; your tap resolves it, same as /approve</li>
+          <li><b>She reaches out</b> — the agent gets a <code>familiar_notify</code> tool: banner + chirp + optional speech when something needs your desk</li>
+          <li><b>A voice</b> — replies and alerts spoken in your configured TTS voice, streamed over your LAN into her speaker</li>
+          <li><b>An evening ritual</b> — once a day she speaks a digest of everything your agents did, composed by your own model</li>
+        </ul>
+      </div>
+    </section>
+
+    <section>
+      <div class="seclabel"><h2>What it takes</h2><div class="rule"></div></div>
+      <div class="card">
+        <p><b>~$30 of hardware</b> (one touchscreen dev board, a microSD card, a tiny speaker),
+        a USB-C cable to the machine running your
+        <a href="https://github.com/NousResearch/hermes-agent">Hermes</a> gateway, and one
+        plugin install. Firmware flashes from your browser — no toolchain. See
+        <a href="build.html">BUILD</a> for the full bill of materials and
+        <a href="plugin.html">PLUGIN</a> for the software side.</p>
+        <p><span class="chip soon">status</span>&nbsp; Docs preview — the public firmware release,
+        browser flasher, and printable case files are landing now. Star the repo to follow along.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="seclabel"><h2>For your agent, not just for you</h2><div class="rule"></div></div>
+      <div class="card">
+        <p>This site is <b>agent-first</b>: <a href="agent.md"><code>agent.md</code></a> is a
+        machine-readable setup runbook. Once your familiar is flashed and plugged in, tell your
+        Hermes agent: <i>"set up my familiar from buildafamiliar.com/agent.md"</i> — and it
+        installs its own body.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Familiar is an independent third-party project for the Hermes agent platform — built entirely
+    on the official plugin surface. Not affiliated with Nous Research.
+    // MIT licensed // <a href="https://github.com/webdevtodayjason/hermes">github</a>
+  </footer>
+</div>
+</body>
+</html>

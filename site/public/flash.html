@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flash — firmware in your browser</title>
+<meta name="description" content="Flash the Hermes Familiar firmware from your browser over WebSerial. No toolchain required.">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📟</text></svg>">
+</head>
+<body>
+<div class="crt">
+  <nav aria-label="site">
+    <a href="/">FACE</a>
+    <a href="build.html">BUILD</a>
+    <a href="plugin.html">PLUGIN</a>
+    <a href="flash.html" aria-current="page">FLASH</a>
+    <a href="roadmap.html">ROADMAP</a>
+  </nav>
+  <header class="hero">
+    <div class="sysline">firmware // webserial flasher // chrome + edge</div>
+    <h1>FLASH HER</h1>
+    <p class="sub">Plug the board into this computer, click the button, pick the serial port —
+    firmware installs from the browser via WebSerial. <b>No toolchain, no python, no drivers</b>
+    on macOS/Linux (Windows may want the usual USB driver).</p>
+  </header>
+
+  <main>
+    <section>
+      <div class="seclabel"><h2>Browser flasher</h2><div class="rule"></div></div>
+      <div class="card">
+        <p><span class="chip soon">arriving with the first public release</span></p>
+        <p>The flasher goes live the moment firmware binaries publish to GitHub Releases —
+        it's <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a> pointed at
+        signed release builds, the same mechanism ESPHome uses for thousands of devices.
+        Until then, flashing works today from source:</p>
+<pre>git clone https://github.com/webdevtodayjason/hermes
+cd hermes
+pio run -t upload    # PlatformIO; board auto-detected on USB</pre>
+      </div>
+    </section>
+
+    <section>
+      <div class="seclabel"><h2>After flashing</h2><div class="rule"></div></div>
+      <div class="card">
+        <ul class="term">
+          <li>She boots to the FACE tab; swipe or tap tabs to explore</li>
+          <li>USB into your gateway machine + <a href="plugin.html">install the plugin</a> — the link comes up by itself</li>
+          <li>Wi-Fi (for voice) is provisioned over USB by the plugin or your agent via <a href="agent.md">agent.md</a> — no SD card editing</li>
+          <li>Wrong-way-up on your stand? Rotation is a one-line config over USB</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Familiar is an independent third-party project for the Hermes agent platform.
+    // MIT licensed // <a href="https://github.com/webdevtodayjason/hermes">github</a>
+  </footer>
+</div>
+</body>
+</html>
