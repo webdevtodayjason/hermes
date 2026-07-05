@@ -110,13 +110,17 @@ td b { color: var(--ink); }
 .d-tabs button.on { color: var(--ink); border-bottom-color: var(--ink);
   text-shadow: 0 0 8px rgba(88,227,137,.5); }
 .d-tabs button:focus-visible { outline: 1px solid var(--amber); outline-offset: -3px; }
-.d-screen { min-height: 232px; position: relative; }
-.d-pane { display: none; }
+/* Fixed landscape screen height — every tab keeps the same rectangle, and the
+   square face is constrained to fit inside it (like the device crops her into
+   the 240px-tall portrait panel) rather than stretching the screen tall. */
+.d-screen { height: 240px; position: relative; overflow: hidden; }
+.d-pane { display: none; height: 240px; }
 .d-pane.on { display: block; }
-.d-body { display: flex; min-height: 232px; }
+.d-body { display: flex; height: 240px; }
 .d-face { flex: 3; display: flex; align-items: center; justify-content: center;
-  padding: 6px; overflow: hidden; }
-.d-face img { max-width: 100%; height: auto; filter: drop-shadow(0 0 12px rgba(88,227,137,.35)); }
+  padding: 6px; overflow: hidden; min-width: 0; }
+.d-face img { width: auto; height: auto; max-height: 228px; max-width: 100%;
+  filter: drop-shadow(0 0 12px rgba(88,227,137,.35)); }
 .d-vitals { flex: 0 0 88px; border-left: 1px solid var(--edge); padding: 12px 10px;
   font-size: 11px; line-height: 2; color: var(--dim); }
 .d-vitals b { color: var(--ink); display: block; }
