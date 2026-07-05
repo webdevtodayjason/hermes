@@ -444,8 +444,12 @@ def _handle_device_line(evt: dict) -> None:
             ip = _voice.lan_ip()
             if ip:
                 tcp_cfg = _actions.load_config().get("transport") or {}
-                _link.send({"type": "config", "host": {
-                    "ip": ip, "port": int(tcp_cfg.get("port", 8767))}})
+                host = {"ip": ip, "port": int(tcp_cfg.get("port", 8767))}
+                tok = str(tcp_cfg.get("token") or "").strip()
+                if tok:
+                    # device needs it to dial home now that TCP is authed
+                    host["token"] = tok
+                _link.send({"type": "config", "host": host})
             _link.send(_actions.deck_frame(_jobs.actions))
         logger.info("device: %s", evt)
         return
@@ -633,7 +637,12 @@ def register(ctx) -> None:
         _link.start()
         tcp_cfg = cfg.get("transport") or {}
         if tcp_cfg.get("enabled", True):
-            _link.start_tcp(int(tcp_cfg.get("port", 8767)))
+            _tok = str(tcp_cfg.get("token") or "").strip() or None
+            if not _tok:
+                logger.warning("familiar transport.token not set — tcp/ws legs are OPEN; "
+                               "add transport.token to familiar_actions.json")
+            _link.start_tcp(int(tcp_cfg.get("port", 8767)), token=_tok)
+            _link.start_ws(int(tcp_cfg.get("ws_port", 8768)), token=_tok)
         logger.info("familiar serial link started (gateway process)")
 
     ctx.register_hook("on_session_start", _on_session_start)

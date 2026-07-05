@@ -83,10 +83,23 @@ Ask the operator for the SSID/password of a network that shares a LAN with this
 machine (voice needs the device and gateway on the same subnet). Full runbook:
 https://buildafamiliar.com/agent.md
 
+## Network transports (phones + untethered device)
+
+The plugin also serves the same newline-JSON protocol over the network,
+configured in the `transport` block of `~/.hermes/familiar_actions.json`
+(`{"enabled":true,"port":8767,"ws_port":8768,"token":"<secret>"}`):
+
+- TCP :8767 — the device dials home when USB goes silent.
+- WebSocket :8768 — the Pocket Familiar phone app / browsers.
+- With `token` set (it should be — network clients can approve dangerous
+  commands), a client's first message must be `{"type":"auth","token":"…"}`
+  or it is dropped; success is acked with `{"type":"auth","ok":true}`.
+
 ## Troubleshooting
 
 - **Link status:** `/familiar` shows connected/searching, transport
-  (`usb:<port>` or `tcp`), pending approvals, and job state.
+  (`usb:<port>`, `tcp`, `ws`, or combinations like `usb:...+ws`), pending
+  approvals, and job state.
 - **Test it:** `/familiar ping` (banner + chirp) or `/familiar say hello`
   (speech — needs speaker + Wi-Fi).
 - **Not connecting:** the plugin autodetects on any `/dev/cu.usbmodem*` /

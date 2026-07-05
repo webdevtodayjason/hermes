@@ -118,6 +118,26 @@ What the device shows/does in plugin mode:
 See [`docs/HERMES_INTEGRATION.md`](docs/HERMES_INTEGRATION.md) for the full
 contract.
 
+### Network transports (TCP + WebSocket)
+
+Besides USB, the plugin listens on two network legs speaking the identical
+newline-JSON protocol — configured in the `transport` block of
+`~/.hermes/familiar_actions.json`:
+
+```json
+"transport": {"enabled": true, "port": 8767, "ws_port": 8768, "token": "<secret>"}
+```
+
+- **TCP :8767** — the device dials home when its USB host goes silent
+  (untethered mode).
+- **WebSocket :8768** — phones / browsers (the Pocket Familiar iOS app);
+  every frame is broadcast to all connected clients, even while USB is up.
+- **Token auth** — with `token` set, a client's **first** line/message must be
+  `{"type":"auth","token":"…"}`; anything else drops the connection (server
+  replies `{"type":"auth","ok":true}` on success). Mandatory in practice: a
+  network client can approve dangerous commands. No `token` in the config
+  leaves both legs open (logged loudly) — old-firmware back-compat only.
+
 ## Standalone bridge (dev fallback)
 
 For development without a gateway (or on a machine without Hermes), the

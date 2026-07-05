@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import atexit
 import glob
+import hmac
 import json
 import logging
 import queue
@@ -66,24 +67,25 @@ class SerialLink:
         self._warned_pyserial = False
         self._scan_fails = 0
         self._last_unwedge = 0.0
-        self._tcp_clients: list = []
-        self._tcp_lock = threading.Lock()
-        self._last_tcp_beat = 0.0
+        # network surfaces (device-over-TCP, phones-over-WS): (kind, send_fn)
+        self._net_clients: list = []
+        self._net_lock = threading.Lock()
+        self._last_net_beat = 0.0
         self.port: str | None = None      # active port when connected
 
     # -- public ----------------------------------------------------------
 
     @property
     def connected(self) -> bool:
-        return self._ser is not None or bool(self._tcp_clients)
+        return self._ser is not None or bool(self._net_clients)
 
     @property
     def transport(self) -> str:
+        with self._net_lock:
+            kinds = sorted({k for k, _ in self._net_clients})
         if self._ser is not None:
-            return f"usb:{self.port}"
-        if self._tcp_clients:
-            return "tcp"
-        return "none" 
+            return "+".join([f"usb:{self.port}"] + kinds)
+        return "+".join(kinds) if kinds else "none"
 
     def send(self, obj: dict) -> None:
         """Queue a frame for the device. Never blocks; drops oldest on overflow."""
@@ -103,18 +105,51 @@ class SerialLink:
         atexit.register(self._drop)   # release the port with proper line-state on exit
         threading.Thread(target=self._run, name="familiar-serial", daemon=True).start()
 
-    # -- TCP leg (untethered mode) ---------------------------------------
-    # The device connects OUT to us when its USB host goes silent. Same
-    # newline-JSON protocol; send() prefers USB when both are up.
+    # -- network legs (untethered device via TCP, phones/PWA via WS) ------
+    # Same newline-JSON protocol on both. Every outbound frame is broadcast
+    # to all authed network clients, even while USB is up (a phone is a
+    # second surface, not a fallback). With transport.token set, a client's
+    # FIRST line/message must be {"type":"auth","token":"…"} or it is dropped
+    # — a network client can approve destructive commands.
 
-    def start_tcp(self, port: int) -> None:
+    @staticmethod
+    def _auth_ok(raw, token: str) -> bool:
+        try:
+            if isinstance(raw, (bytes, bytearray)):
+                raw = raw.decode("utf-8", "replace")
+            evt = json.loads(raw)
+        except Exception:
+            return False
+        return (isinstance(evt, dict) and evt.get("type") == "auth"
+                and hmac.compare_digest(str(evt.get("token") or ""), token))
+
+    def _net_add(self, kind: str, sender) -> None:
+        with self._net_lock:
+            self._net_clients.append((kind, sender))
+
+    def _net_del(self, sender) -> None:
+        with self._net_lock:
+            self._net_clients = [c for c in self._net_clients if c[1] is not sender]
+
+    def start_tcp(self, port: int, token: str | None = None):
+        """Newline-JSON TCP listener. Returns the bound port, or None."""
         link = self
 
         class _Handler(socketserver.StreamRequestHandler):
             def handle(self):
                 peer = f"{self.client_address[0]}:{self.client_address[1]}"
-                with link._tcp_lock:
-                    link._tcp_clients.append(self.wfile)
+                if token and not link._auth_ok(self.rfile.readline(), token):
+                    logger.warning("familiar tcp auth failed from %s", peer)
+                    return
+                w = self.wfile
+
+                def sender(data: bytes) -> None:
+                    w.write(data)
+                    w.flush()
+
+                if token:
+                    sender(b'{"type":"auth","ok":true}\n')
+                link._net_add("tcp", sender)
                 logger.info("familiar connected via tcp %s", peer)
                 try:
                     for raw in self.rfile:
@@ -128,11 +163,7 @@ class SerialLink:
                             except Exception:
                                 logger.exception("familiar tcp on_line failed")
                 finally:
-                    with link._tcp_lock:
-                        try:
-                            link._tcp_clients.remove(self.wfile)
-                        except ValueError:
-                            pass
+                    link._net_del(sender)
                     logger.info("familiar tcp %s disconnected", peer)
 
         class _Srv(socketserver.ThreadingTCPServer):
@@ -143,25 +174,84 @@ class SerialLink:
             srv = _Srv(("0.0.0.0", int(port)), _Handler)
         except OSError as e:
             logger.warning("familiar tcp port %s unavailable: %s", port, e)
-            return
+            return None
         threading.Thread(target=srv.serve_forever, name="familiar-tcp", daemon=True).start()
-        logger.info("familiar tcp transport listening on :%s", port)
+        bound = srv.server_address[1]
+        logger.info("familiar tcp transport listening on :%s%s", bound,
+                    "" if token else " (NO TOKEN — open)")
+        return bound
 
-    def _tcp_send(self, data: bytes) -> bool:
-        with self._tcp_lock:
-            clients = list(self._tcp_clients)
-        sent = False
-        for w in clients:
+    def start_ws(self, port: int, token: str | None = None):
+        """WebSocket listener speaking the identical frames (for phones/PWA).
+        Returns the bound port, or None (missing lib / port busy)."""
+        link = self
+        try:
+            from websockets.sync.server import serve
+        except ImportError:
+            logger.warning("websockets not installed in gateway venv — familiar ws transport disabled")
+            return None
+
+        def handler(conn):
             try:
-                w.write(data)
-                w.flush()
+                peer = "%s:%s" % conn.remote_address[:2]
+            except Exception:
+                peer = "?"
+            if token:
+                try:
+                    first = conn.recv(timeout=10)
+                except Exception:
+                    return
+                if not link._auth_ok(first, token):
+                    logger.warning("familiar ws auth failed from %s", peer)
+                    return
+                try:
+                    conn.send('{"type":"auth","ok":true}\n')
+                except Exception:
+                    return
+
+            def sender(data: bytes) -> None:
+                conn.send(data.decode("utf-8"))
+
+            link._net_add("ws", sender)
+            logger.info("familiar connected via ws %s", peer)
+            try:
+                for msg in conn:
+                    try:
+                        evt = json.loads(msg)
+                    except Exception:
+                        continue
+                    if isinstance(evt, dict):
+                        try:
+                            link._on_line(evt)
+                        except Exception:
+                            logger.exception("familiar ws on_line failed")
+            except Exception:
+                pass
+            finally:
+                link._net_del(sender)
+                logger.info("familiar ws %s disconnected", peer)
+
+        try:
+            srv = serve(handler, "0.0.0.0", int(port))
+        except OSError as e:
+            logger.warning("familiar ws port %s unavailable: %s", port, e)
+            return None
+        threading.Thread(target=srv.serve_forever, name="familiar-ws", daemon=True).start()
+        bound = srv.socket.getsockname()[1]
+        logger.info("familiar ws transport listening on :%s%s", bound,
+                    "" if token else " (NO TOKEN — open)")
+        return bound
+
+    def _net_send(self, data: bytes) -> bool:
+        with self._net_lock:
+            clients = list(self._net_clients)
+        sent = False
+        for kind, send_fn in clients:
+            try:
+                send_fn(data)
                 sent = True
             except Exception:
-                with self._tcp_lock:
-                    try:
-                        self._tcp_clients.remove(w)
-                    except ValueError:
-                        pass
+                self._net_del(send_fn)
         return sent
 
     def _try_unwedge(self, port: str) -> None:
@@ -276,31 +366,33 @@ class SerialLink:
             if self._ser is None:
                 self._connect()
                 if self._ser is None:
-                    # no USB — drain the queue over TCP if the device dialed in
+                    # no USB — drain the queue to network clients only
                     while not self._q.empty():
                         try:
                             obj = self._q.get_nowait()
                         except queue.Empty:
                             break
-                        self._tcp_send((json.dumps(obj, separators=(",", ":")) + "\n").encode())
+                        self._net_send((json.dumps(obj, separators=(",", ":")) + "\n").encode())
                     now = time.time()
-                    if self._make_heartbeat and self._tcp_clients and now - self._last_tcp_beat >= self._heartbeat:
-                        self._last_tcp_beat = now
+                    if self._make_heartbeat and self._net_clients and now - self._last_net_beat >= self._heartbeat:
+                        self._last_net_beat = now
                         hb = self._make_heartbeat()
                         if hb:
-                            self._tcp_send((json.dumps(hb, separators=(",", ":")) + "\n").encode())
-                    time.sleep(1.0 if self._tcp_clients else _RESCAN_SECS)
+                            self._net_send((json.dumps(hb, separators=(",", ":")) + "\n").encode())
+                    time.sleep(1.0 if self._net_clients else _RESCAN_SECS)
                     continue
                 buf = b""
                 last_beat = 0.0
             try:
-                # outbound
+                # outbound — serial plus every network surface
                 while True:
                     try:
                         obj = self._q.get_nowait()
                     except queue.Empty:
                         break
-                    self._ser.write((json.dumps(obj, separators=(",", ":")) + "\n").encode())
+                    data = (json.dumps(obj, separators=(",", ":")) + "\n").encode()
+                    self._ser.write(data)
+                    self._net_send(data)
                 self._ser.flush()
                 # heartbeat
                 now = time.time()
@@ -308,8 +400,10 @@ class SerialLink:
                     last_beat = now
                     hb = self._make_heartbeat()
                     if hb:
-                        self._ser.write((json.dumps(hb, separators=(",", ":")) + "\n").encode())
+                        data = (json.dumps(hb, separators=(",", ":")) + "\n").encode()
+                        self._ser.write(data)
                         self._ser.flush()
+                        self._net_send(data)
                 # inbound (readline honors timeout=0.05, so this loop stays responsive)
                 raw = self._ser.readline()
                 if raw:
