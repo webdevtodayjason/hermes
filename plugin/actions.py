@@ -66,7 +66,9 @@ def _action_command(action: dict) -> list[str] | None:
         return cmd
     prompt = action.get("prompt")
     if isinstance(prompt, str) and prompt.strip():
-        return ["hermes", "chat", "-q", prompt]
+        # -Q = programmatic quiet: no banner/box, no interactive TTS (a deck
+        # button must not make the Mac talk); -q carries the prompt.
+        return ["hermes", "chat", "-Q", "-q", prompt]
     return None
 
 
@@ -96,7 +98,8 @@ def compact(s: str, n: int = 120) -> str:
 
 
 _NOISE_PREFIXES = ("Warning:", "Query:", "Initializing", "Resume this",
-                   "Session:", "Duration:", "Messages:", "hermes --resume", "─")
+                   "Session:", "session_id:", "Duration:", "Messages:",
+                   "hermes --resume", "─")
 
 
 def clean_output(text: str) -> str:

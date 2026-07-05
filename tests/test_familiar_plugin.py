@@ -206,7 +206,7 @@ def test_clean_output_extracts_hermes_answer():
 
 def test_prompt_actions_become_hermes_chat_commands():
     cmd = actions._action_command({"prompt": "say hi"})
-    assert cmd == ["hermes", "chat", "-q", "say hi"]
+    assert cmd == ["hermes", "chat", "-Q", "-q", "say hi"]
     assert actions._action_command({"label": "empty"}) is None
 
 
