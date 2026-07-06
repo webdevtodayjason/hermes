@@ -748,38 +748,51 @@ static void initPowerDiagnostics() {
 
 static void initMotionAndRtc() {
   Wire.begin(SENSOR_SDA, SENSOR_SCL);
-  // QMI8658 must answer WHO_AM_I (0x00) == 0x05 — an ACK alone can be a
-  // stranger on the bus. RTC on the same bus reads fine, so failures here
-  // are chip-specific, not wiring.
+  // QMI8658 bring-up per QST datasheet + SensorLib + Waveshare demo:
+  //  - after RESET (0x60=0xB0) the chip ACKs writes but DISCARDS them until
+  //    RST_RESULT (0x4D) reads 0x80 — poll it, never blind-delay. A chip
+  //    caught mid-boot stays wedged until FULL power-off (it survives ESP32
+  //    reflash/reset; with no battery attached, a USB unplug power-cycles it).
+  //  - identity must be WHO_AM_I (0x00) == 0x05; an I2C ACK can be a stranger.
+  //  - config with sensors OFF, enable accel+gyro LAST (accel-only 0x01 is a
+  //    known bad mode: half-scale/zero output — SensorLib issue #2).
   uint8_t who = 0;
+  uint8_t rb[3] = {0xFF, 0xFF, 0xFF};
   imuReady = false;
   for (uint8_t addr : {(uint8_t)0x6B, (uint8_t)0x6A}) {
-    if (i2cRead8(addr, 0x00, &who) && who == 0x05) {
+    i2cWrite8(addr, 0x60, 0xB0);              // RESET
+    bool booted = false;
+    for (uint32_t t0 = millis(); millis() - t0 < 2000;) {
+      uint8_t r = 0;
+      if (i2cRead8(addr, 0x4D, &r) && r == 0x80) { booted = true; break; }
+      delay(10);
+    }
+    if (booted && i2cRead8(addr, 0x00, &who) && who == 0x05) {
       imuReady = true;
       activeQmiAddr = addr;
       break;
     }
   }
-  uint8_t rb[3] = {0xFF, 0xFF, 0xFF};
   if (imuReady) {
-    // accel is DISABLED at power-on (silent zeros) — soft reset, settle,
-    // then write-and-verify CTRL1/2/7, retrying: writes right after reset
-    // can be ACKed and dropped while the core reboots.
-    // CTRL1 0x40 = addr auto-increment, little-endian (parser reads LE).
-    i2cWrite8(activeQmiAddr, 0x60, 0xB0);   // RESET
-    delay(150);
-    const uint8_t seq[][2] = {{0x02, 0x40}, {0x03, 0x23}, {0x08, 0x01}};
-    for (int attempt = 0; attempt < 3 && !imuCfgOk; attempt++) {
-      imuCfgOk = true;
-      for (int i = 0; i < 3; i++) {
-        i2cWrite8(activeQmiAddr, seq[i][0], seq[i][1]);
-        rb[i] = 0xFF;
-        if (!i2cRead8(activeQmiAddr, seq[i][0], &rb[i]) || rb[i] != seq[i][1])
-          imuCfgOk = false;
-      }
-      if (!imuCfgOk) delay(50);
+    // ±8g -> 4096 LSB/g (poll loop divides accordingly); gyro ±512dps.
+    const uint8_t seq[][2] = {
+        {0x02, 0x40},   // CTRL1: addr auto-increment, little-endian
+        {0x08, 0x00},   // CTRL7: everything off while configuring (stale state survives warm resets)
+        {0x03, 0x23},   // CTRL2: accel ±8g @ ~900Hz
+        {0x04, 0x43},   // CTRL3: gyro ±512dps (Waveshare demo default)
+        {0x06, 0x00},   // CTRL5: LPFs off
+        {0x08, 0x03},   // CTRL7: aEN|gEN — enable LAST
+    };
+    imuCfgOk = true;
+    for (auto &s : seq) {
+      i2cWrite8(activeQmiAddr, s[0], s[1]);
+      uint8_t r = 0xFF;
+      if (!i2cRead8(activeQmiAddr, s[0], &r) || r != s[1]) imuCfgOk = false;
     }
-    delay(10);   // first samples need a beat after enable
+    i2cRead8(activeQmiAddr, 0x02, &rb[0]);
+    i2cRead8(activeQmiAddr, 0x03, &rb[1]);
+    i2cRead8(activeQmiAddr, 0x08, &rb[2]);
+    delay(160);   // gyro turn-on time; outputs are legitimately zero before this
   }
   uint8_t rtcprobe = 0;
   rtcReady = i2cRead8(PCF85063_ADDR, 0x04, &rtcprobe);
@@ -812,9 +825,9 @@ static void pollPeripheralSensors() {
       int16_t ax = (int16_t)((raw[1] << 8) | raw[0]);
       int16_t ay = (int16_t)((raw[3] << 8) | raw[2]);
       int16_t az = (int16_t)((raw[5] << 8) | raw[4]);
-      accelX = ax / 8192.0f;
-      accelY = ay / 8192.0f;
-      accelZ = az / 8192.0f;
+      accelX = ax / 4096.0f;   // CTRL2 0x23 = ±8g -> 4096 LSB/g
+      accelY = ay / 4096.0f;
+      accelZ = az / 4096.0f;
       float mag = sqrtf(accelX * accelX + accelY * accelY + accelZ * accelZ);
       float delta = fabsf(mag - lastAccelMag);
       uint32_t prevMotionMs = lastMotionMs;    // before this sample
@@ -895,6 +908,31 @@ static void pollPeripheralSensors() {
       lastAccelMag = mag;
     }
   }
+}
+
+static String i2cScanReport = "{}";   // both buses: [[addr,reg0],…] — built once
+
+static String scanBus(TwoWire &w) {
+  String out = "[";
+  int found = 0;
+  for (uint8_t a = 0x08; a <= 0x77 && found < 8; a++) {
+    w.beginTransmission(a);
+    if (w.endTransmission(true) != 0) continue;
+    uint8_t v = 0xFF;
+    w.beginTransmission(a);
+    w.write((uint8_t)0x00);
+    if (w.endTransmission(true) == 0 && w.requestFrom((int)a, 1) == 1) v = w.read();
+    if (found) out += ",";
+    out += "[" + String(a) + "," + String(v) + "]";
+    found++;
+  }
+  return out + "]";
+}
+
+static void buildI2cScan() {
+  // diagnostic: every ACKing address on both buses + its reg-0x00 value.
+  // QMI8658 identifies as reg0==5; anything else at 0x6B is a stranger.
+  i2cScanReport = String("{\"sens\":") + scanBus(Wire) + ",\"tp\":" + scanBus(Wire1) + "}";
 }
 
 static String batteryLine() {
@@ -1394,6 +1432,7 @@ static void applyJsonLine(const String &line) {
     // the probe eats our boot hello). Re-announce so the host re-pushes the
     // deck + host config immediately instead of waiting for the 60s tick.
     sendLine("{\"hello\":\"hermes-buddy\",\"transport\":\"reconnect\"}");
+    sendLine(String("{\"cmd\":\"diag\",\"scan\":") + i2cScanReport + "}");
     return;
   }
   if (doc["cmd"] == "clear") {
@@ -1646,6 +1685,7 @@ void setup() {
   initManualTouch();
   initPowerDiagnostics();
   initMotionAndRtc();
+  buildI2cScan();   // after both Wire buses are up
   initAudio();
   initSDCard();
   loadDisplayConfigFromSD();
@@ -1803,7 +1843,8 @@ void loop() {
              String(accelZ, 2) + "]" +
              ",\"base\":" + (baseSet ? "true" : "false") +
              ",\"imu_cfg\":" + (imuCfgOk ? "true" : "false") +
-             ",\"imu\":" + (imuReady ? "true" : "false") + "}");
+             ",\"imu\":" + (imuReady ? "true" : "false") +
+             ",\"scan\":" + i2cScanReport + "}");
   }
 
   if (toastUntilMs && millis() >= toastUntilMs) {

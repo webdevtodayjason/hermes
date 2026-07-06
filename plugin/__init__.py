@@ -463,6 +463,9 @@ def _handle_device_line(evt: dict, origin: str = "usb") -> None:
     cmd = evt.get("cmd") or evt.get("event")
     if cmd in _INTERACTION_CMDS:
         _presence[_surface_of(origin)] = time.time()
+    if cmd == "diag":
+        logger.info("familiar: diag %s", evt)
+        return
     if cmd == "telemetry":
         logger.info("familiar: telemetry %s", evt)   # once/min; remote calibration eyes
         _telemetry.update(evt)
