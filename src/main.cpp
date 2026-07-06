@@ -794,26 +794,32 @@ static void pollPeripheralSensors() {
       uint32_t prevMotionMs = lastMotionMs;    // before this sample
       if (delta > 0.10f) lastMotionMs = now;   // noise floor — calibration knob
 
-      // learn the resting attitude: ~3s of stillness with sane gravity.
-      // ponytail: baseline is boot-captured only; re-seat the stand -> reboot
-      // (or add a slow EMA re-learn if that ever annoys)
+      // learn the resting attitude: ~3s of stillness (scale-agnostic — the
+      // dot product below is normalized). Fallback: after 60s without a
+      // still window, take the current sample — a rough baseline beats an
+      // inert detector. ponytail: boot-captured only; re-seat -> reboot
       if (!baseSet) {
-        if (delta < 0.06f && fabsf(mag - 1.0f) < 0.25f) {
+        if (delta < 0.10f) {
           if (++basePolls >= 10) {
             baseX = accelX; baseY = accelY; baseZ = accelZ;
             baseSet = true;
-            Serial.printf("{\"imu_base\":[%.2f,%.2f,%.2f]}\n", baseX, baseY, baseZ);
           }
         } else {
           basePolls = 0;
         }
+        if (!baseSet && millis() > 60000 && mag > 0.15f) {
+          baseX = accelX; baseY = accelY; baseZ = accelZ;
+          baseSet = true;
+        }
+        if (baseSet)
+          Serial.printf("{\"imu_base\":[%.2f,%.2f,%.2f]}\n", baseX, baseY, baseZ);
       }
       // face-down = flipped ~opposite the resting attitude; upright = back
       // near it. dot in [-1,1]; trigger <-0.35 (5 polls), release >+0.2 (3).
       float dot = 1.0f;
       if (baseSet) {
         float bm = sqrtf(baseX * baseX + baseY * baseY + baseZ * baseZ);
-        if (bm > 0.5f && mag > 0.5f)
+        if (bm > 0.15f && mag > 0.15f)   // scale-agnostic; just avoid noise/0
           dot = (accelX * baseX + accelY * baseY + accelZ * baseZ) / (bm * mag);
       }
       if (dot < -0.35f) { uprightPolls = 0; if (faceDownPolls < 250) faceDownPolls++; }
@@ -1760,12 +1766,16 @@ void loop() {
     approvalNagMuted = false;   // next approval starts loud by default
   }
 
-  // Telemetry heartbeat: battery, quiet, usb-alive — host routes and warns on it.
+  // Telemetry heartbeat: battery, quiet, usb-alive, accel snapshot — host
+  // routes/warns on it, and acc gives remote eyes for gesture calibration.
   if (millis() - lastTelemetryMs > 60000) {
     lastTelemetryMs = millis();
     sendLine(String("{\"cmd\":\"telemetry\",\"bat\":") + String(batVolts, 2) +
              ",\"quiet\":" + (quietMode ? "true" : "false") +
-             ",\"usb\":" + (usbAlive ? "true" : "false") + "}");
+             ",\"usb\":" + (usbAlive ? "true" : "false") +
+             ",\"acc\":[" + String(accelX, 2) + "," + String(accelY, 2) + "," +
+             String(accelZ, 2) + "]" +
+             ",\"base\":" + (baseSet ? "true" : "false") + "}");
   }
 
   if (toastUntilMs && millis() >= toastUntilMs) {
