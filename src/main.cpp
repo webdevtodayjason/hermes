@@ -747,7 +747,7 @@ static void initPowerDiagnostics() {
 }
 
 static void initMotionAndRtc() {
-  Wire.begin(SENSOR_SDA, SENSOR_SCL);
+  // Wire is already bound to the hunt's winning pins by buildI2cScan()
   // QMI8658 bring-up per QST datasheet + SensorLib + Waveshare demo:
   //  - after RESET (0x60=0xB0) the chip ACKs writes but DISCARDS them until
   //    RST_RESULT (0x4D) reads 0x80 — poll it, never blind-delay. A chip
@@ -911,6 +911,7 @@ static void pollPeripheralSensors() {
 }
 
 static String i2cScanReport = "{}";   // both buses: [[addr,reg0],…] — built once
+static int sensSda = SENSOR_SDA, sensScl = SENSOR_SCL;   // winner of the bus hunt
 
 static String scanBus(TwoWire &w) {
   String out = "[";
@@ -930,9 +931,32 @@ static String scanBus(TwoWire &w) {
 }
 
 static void buildI2cScan() {
-  // diagnostic: every ACKing address on both buses + its reg-0x00 value.
-  // QMI8658 identifies as reg0==5; anything else at 0x6B is a stranger.
-  i2cScanReport = String("{\"sens\":") + scanBus(Wire) + ",\"tp\":" + scanBus(Wire1) + "}";
+  // Bus hunt: the sensor bus scanned EMPTY at (sda=11,scl=10) while the same
+  // scanner finds the CST328 on Wire1 — so try both pin orientations, report
+  // every ACKing address + its reg-0x00 byte, and bind Wire to whichever
+  // orientation actually has silicon. QMI8658 identifies as reg0==5.
+  const int cand[][2] = {{11, 10}, {10, 11}};
+  String rep = "";
+  bool found = false;
+  for (int i = 0; i < 2; i++) {
+    Wire.end();
+    Wire.begin(cand[i][0], cand[i][1]);
+    delay(10);
+    String hits = scanBus(Wire);
+    if (i) rep += ",";
+    rep += String("{\"sda\":") + cand[i][0] + ",\"scl\":" + cand[i][1] +
+           ",\"hits\":" + hits + "}";
+    if (!found && hits.length() > 2) {   // "[]" is empty; anything longer has hits
+      found = true;
+      sensSda = cand[i][0];
+      sensScl = cand[i][1];
+    }
+  }
+  Wire.end();
+  Wire.begin(sensSda, sensScl);   // bind the winner (or default if both empty)
+  delay(10);
+  i2cScanReport = String("{\"sens\":[") + rep + "],\"pins\":[" + sensSda + "," +
+                  sensScl + "],\"tp\":" + scanBus(Wire1) + "}";
 }
 
 static String batteryLine() {
@@ -1684,8 +1708,8 @@ void setup() {
   gfx->setBrightness(185);
   initManualTouch();
   initPowerDiagnostics();
+  buildI2cScan();   // bus hunt binds Wire to the pins that actually have silicon
   initMotionAndRtc();
-  buildI2cScan();   // after both Wire buses are up
   initAudio();
   initSDCard();
   loadDisplayConfigFromSD();
