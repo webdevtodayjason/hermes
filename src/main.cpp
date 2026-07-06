@@ -141,6 +141,7 @@ static uint32_t sdMB = 0;
 static String sdStatus = "SD:checking";
 static bool audioReady = false;
 static bool imuReady = false;
+static bool imuCfgOk = false;   // config writes verified by read-back
 static bool rtcReady = false;
 static bool wifiReady = false;
 static String wifiStatus = "WiFi:off";
@@ -755,12 +756,25 @@ static void initMotionAndRtc() {
     activeQmiAddr = 0x6A;
   }
   if (imuReady) {
-    i2cWrite8(activeQmiAddr, 0x02, 0x60);
-    i2cWrite8(activeQmiAddr, 0x03, 0x23);
-    i2cWrite8(activeQmiAddr, 0x08, 0x01);
+    // QMI8658 boots with accel DISABLED and reads back zeros if config
+    // writes are lost — soft reset, then write-and-verify each register.
+    // CTRL1 0x40 = addr auto-increment, little-endian (parser reads LE;
+    // the old 0x60 also set big-endian — byte-swapped had data flowed).
+    i2cWrite8(activeQmiAddr, 0x60, 0xB0);   // RESET
+    delay(20);
+    const uint8_t seq[][2] = {{0x02, 0x40}, {0x03, 0x23}, {0x08, 0x01}};
+    imuCfgOk = true;
+    for (auto &s : seq) {
+      i2cWrite8(activeQmiAddr, s[0], s[1]);
+      uint8_t rb = 0xFF;
+      if (!i2cRead8(activeQmiAddr, s[0], &rb) || rb != s[1]) imuCfgOk = false;
+    }
+    delay(10);   // first samples need a beat after enable
   }
   rtcReady = i2cRead8(PCF85063_ADDR, 0x04, &who);
-  Serial.printf("{\"imu\":\"%s\",\"imu_addr\":%u,\"rtc\":\"%s\"}\n", imuReady ? "ok" : "off", activeQmiAddr, rtcReady ? "ok" : "off");
+  Serial.printf("{\"imu\":\"%s\",\"imu_addr\":%u,\"imu_cfg\":\"%s\",\"rtc\":\"%s\"}\n",
+                imuReady ? "ok" : "off", activeQmiAddr,
+                imuCfgOk ? "ok" : "FAIL", rtcReady ? "ok" : "off");
 }
 
 static uint8_t bcd2(uint8_t v) { return ((v >> 4) * 10) + (v & 0x0F); }
@@ -1775,7 +1789,8 @@ void loop() {
              ",\"usb\":" + (usbAlive ? "true" : "false") +
              ",\"acc\":[" + String(accelX, 2) + "," + String(accelY, 2) + "," +
              String(accelZ, 2) + "]" +
-             ",\"base\":" + (baseSet ? "true" : "false") + "}");
+             ",\"base\":" + (baseSet ? "true" : "false") +
+             ",\"imu_cfg\":" + (imuCfgOk ? "true" : "false") + "}");
   }
 
   if (toastUntilMs && millis() >= toastUntilMs) {
