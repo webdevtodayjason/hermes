@@ -899,7 +899,10 @@ static void pollPeripheralSensors() {
       // still window, take the current sample — a rough baseline beats an
       // inert detector. ponytail: boot-captured only; re-seat -> reboot
       if (!baseSet) {
-        if (delta < 0.10f) {
+        // mag sanity on BOTH paths: right after a (recovery) reset the chip
+        // returns valid all-zero reads while sensors spin up — a zero
+        // baseline makes dot() degenerate and disables gestures silently
+        if (delta < 0.10f && mag > 0.5f) {
           if (++basePolls >= 10) {
             baseX = accelX; baseY = accelY; baseZ = accelZ;
             baseSet = true;
@@ -907,7 +910,7 @@ static void pollPeripheralSensors() {
         } else {
           basePolls = 0;
         }
-        if (!baseSet && millis() > 60000 && mag > 0.15f) {
+        if (!baseSet && millis() > 60000 && mag > 0.5f) {
           baseX = accelX; baseY = accelY; baseZ = accelZ;
           baseSet = true;
         }
