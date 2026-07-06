@@ -38,15 +38,19 @@ class FakeCtx:
 class FakeLink:
     port = "/dev/fake"
     connected = True
+    transport = "usb:/dev/fake"
 
     def __init__(self):
         self.sent: list[dict] = []
+        self.legs: list = []   # parallel to sent: None | "desk" | "phone"
 
-    def send(self, obj):
+    def send(self, obj, leg=None):
         self.sent.append(obj)
+        self.legs.append(leg)
 
-    def frames(self, type_):
-        return [f for f in self.sent if f.get("type") == type_]
+    def frames(self, type_, leg="any"):
+        return [f for f, l in zip(self.sent, self.legs)
+                if f.get("type") == type_ and (leg == "any" or l == leg)]
 
 
 @pytest.fixture()
@@ -63,6 +67,10 @@ def wired(monkeypatch, tmp_path):
     familiar._turns.clear()
     familiar._pending.clear()
     familiar._entries.clear()
+    familiar._presence.update({"desk": 0.0, "phone": 0.0})
+    familiar._telemetry.clear()
+    monkeypatch.setattr(familiar, "_desk_quiet", False)
+    monkeypatch.setattr(familiar, "_batt_warned", False)
     yield ctx, link
 
 
@@ -303,3 +311,81 @@ def test_vitals_page_reads_gateway_state(monkeypatch, tmp_path):
     assert "up 2h05m" in page["lines"][0]
     assert "te:ok" in page["lines"][0] and "sl:ER" in page["lines"][0]
     assert "S:12 tools:7 tok:48k" == page["lines"][1]
+
+
+# -- presence routing + telemetry (hardware pass, 2026-07-06) ---------------
+
+def _notify(link, msg="ping"):
+    return familiar._tool_notify({"message": msg})
+
+
+def test_notify_loud_everywhere_when_presence_unknown(wired):
+    _, link = wired
+    _notify(link)
+    desk = link.frames("notify", leg="desk")
+    phone = link.frames("notify", leg="phone")
+    assert desk and phone
+    assert desk[0]["sound"] == "alert" and phone[0]["sound"] == "alert"
+
+
+def test_notify_desk_silent_when_phone_active(wired):
+    _, link = wired
+    familiar._handle_device_line({"cmd": "deck", "i": 99}, origin="ws")  # phone interaction
+    _notify(link)
+    assert link.frames("notify", leg="desk")[0]["sound"] == "none"
+    assert link.frames("notify", leg="phone")[0]["sound"] == "alert"
+
+
+def test_notify_desk_loud_when_desk_freshest(wired):
+    _, link = wired
+    familiar._handle_device_line({"cmd": "deck", "i": 99}, origin="ws")
+    familiar._handle_device_line({"cmd": "touch", "x": 1, "y": 1}, origin="usb")  # desk wins
+    _notify(link)
+    assert link.frames("notify", leg="desk")[0]["sound"] == "alert"
+
+
+def test_facedown_gesture_mutes_desk(wired):
+    _, link = wired
+    familiar._handle_device_line({"cmd": "gesture", "gesture": "facedown", "quiet": True})
+    assert familiar._desk_quiet is True
+    _notify(link)
+    assert link.frames("notify", leg="desk")[0]["sound"] == "none"
+    familiar._handle_device_line({"cmd": "gesture", "gesture": "upright", "quiet": False})
+    assert familiar._desk_quiet is False
+
+
+def test_approval_quiet_flag_when_phone_active(wired):
+    ctx, link = wired
+    familiar._handle_device_line({"cmd": "deck", "i": 99}, origin="ws")
+    ctx.hooks["pre_approval_request"](command="rm -rf /x", session_key="sk1")
+    desk = link.frames("permission", leg="desk")
+    phone = link.frames("permission", leg="phone")
+    assert desk[0].get("quiet") is True
+    assert "quiet" not in phone[0]
+
+
+def test_approval_loud_by_default(wired):
+    ctx, link = wired
+    ctx.hooks["pre_approval_request"](command="rm -rf /x", session_key="sk2")
+    assert "quiet" not in link.frames("permission", leg="desk")[0]
+
+
+def test_low_battery_warns_once_per_crossing(wired):
+    _, link = wired
+    tele = {"cmd": "telemetry", "bat": 3.4, "quiet": False, "usb": False}
+    familiar._handle_device_line(dict(tele))
+    familiar._handle_device_line(dict(tele))          # still low -> no second warn
+    warns = [f for f in link.frames("notify") if "battery low" in f["msg"]]
+    assert len(warns) == 1
+    familiar._handle_device_line({"cmd": "telemetry", "bat": 4.0, "quiet": False, "usb": True})
+    familiar._handle_device_line(dict(tele))          # new crossing -> warn again
+    warns = [f for f in link.frames("notify") if "battery low" in f["msg"]]
+    assert len(warns) == 2
+
+
+def test_state_frame_carries_battery_and_transport(wired):
+    _, link = wired
+    familiar._handle_device_line({"cmd": "telemetry", "bat": 4.02, "quiet": False, "usb": True})
+    frame = familiar._payload()
+    assert frame["battery_v"] == 4.02
+    assert frame["transport"] == "usb:/dev/fake"

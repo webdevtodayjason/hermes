@@ -60,7 +60,7 @@ def cron_page() -> dict:
     return {"type": "page", "slot": 0, "title": title, "lines": lines}
 
 
-def vitals_page(started_at: float, stats: dict) -> dict:
+def vitals_page(started_at: float, stats: dict, link_line: str = "") -> dict:
     up = max(0, int(time.time() - started_at))
     upstr = f"{up // 3600}h{(up % 3600) // 60:02d}m" if up >= 3600 else f"{up // 60}m"
     plat = "?"
@@ -74,10 +74,13 @@ def vitals_page(started_at: float, stats: dict) -> dict:
         pass
     tok = int(stats.get("tokens_today", 0))
     tokstr = f"{tok / 1000:.0f}k" if tok >= 1000 else str(tok)
-    return {"type": "page", "slot": 1, "title": "GATEWAY", "lines": [
+    lines = [
         _fit(f"up {upstr}  {plat}"),
         _fit(f"S:{stats.get('total', 0)} tools:{stats.get('tools_today', 0)} tok:{tokstr}"),
-    ]}
+    ]
+    if link_line:
+        lines.append(_fit(link_line))
+    return {"type": "page", "slot": 1, "title": "GATEWAY", "lines": lines}
 
 
 def fleet_page() -> dict:

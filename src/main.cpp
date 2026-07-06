@@ -150,6 +150,16 @@ static float accelX = 0.0f, accelY = 0.0f, accelZ = 0.0f;
 static float lastAccelMag = 1.0f;
 static uint32_t lastSensorMs = 0;
 static uint32_t lastShakeMs = 0;
+// Physical-gesture state (IMU, 300ms poll). Thresholds are calibration
+// knobs — g-units on this QMI8658 at ±4g/8192 LSB.
+static bool quietMode = false;            // face-down = do-not-disturb
+static uint8_t faceDownPolls = 0;         // consecutive z<-0.75 samples
+static uint8_t uprightPolls = 0;
+static uint32_t lastMotionMs = 0;         // any mag-delta above noise floor
+static uint32_t prevTapPulseMs = 0;       // first pulse of a double-tap pair
+static uint32_t lastPickupMs = 0;
+static bool approvalNagMuted = false;     // tap2 or routed-quiet approval
+static uint32_t lastTelemetryMs = 0;
 static uint8_t activeQmiAddr = QMI8658_ADDR;
 static bool manualTouchReady = false;
 static String touchStatus = "TP:checking";
@@ -258,9 +268,10 @@ static int8_t jobIndex = -1;           // which deck button's job is running
 
 // Untethered: when USB goes silent and Wi-Fi is up, dial home over TCP
 // (same newline-JSON protocol). Host address provisioned over USB into
-// /hermes-buddy/config.json {"host":{"ip","port"}}.
+// /hermes-buddy/config.json {"host":{"ip","port","token"}}.
 static String hostIp;
 static uint16_t hostPort = 8767;
+static String hostToken;   // transport auth — first line on TCP dial-home
 static WiFiClient tcpLink;
 static String tcpLine;
 static uint32_t lastTcpTryMs = 0;
@@ -663,6 +674,7 @@ static void chirpTone(uint16_t hz, uint16_t ms) {
 static volatile bool sayBusy = false;
 
 static void chirp(const char* kind) {
+  if (quietMode) return; // face-down = silent, no exceptions
   if (sayBusy) return;  // never chirp over speech
   if (!strcmp(kind, "boot")) { chirpTone(740, 35); chirpTone(988, 45); }
   else if (!strcmp(kind, "tap")) chirpTone(1200, 20);
@@ -711,6 +723,7 @@ static void sayTask(void*) {
 }
 
 static void startSay(const char* url) {
+  if (quietMode) return; // face-down mutes speech too
   if (!url || !url[0]) return;
   if (!wifiReady) { Serial.println("{\"say\":\"no-wifi\"}"); return; }
   if (!audioReady || sayBusy) return;
@@ -772,11 +785,54 @@ static void pollPeripheralSensors() {
       accelY = ay / 8192.0f;
       accelZ = az / 8192.0f;
       float mag = sqrtf(accelX * accelX + accelY * accelY + accelZ * accelZ);
-      if (fabsf(mag - lastAccelMag) > 0.65f && now - lastShakeMs > 1800) {
+      float delta = fabsf(mag - lastAccelMag);
+      uint32_t prevMotionMs = lastMotionMs;    // before this sample
+      if (delta > 0.10f) lastMotionMs = now;   // noise floor — calibration knob
+
+      // face-down / upright: z flips sign against gravity. 5 polls = ~1.5s.
+      if (accelZ < -0.75f) { uprightPolls = 0; if (faceDownPolls < 250) faceDownPolls++; }
+      else if (accelZ > 0.5f) { faceDownPolls = 0; if (uprightPolls < 250) uprightPolls++; }
+      if (!quietMode && faceDownPolls == 5) {
+        quietMode = true;
+        gfx->setBrightness(10);   // screen is against the desk anyway
+        sendLine("{\"cmd\":\"gesture\",\"gesture\":\"facedown\",\"quiet\":true}");
+      } else if (quietMode && uprightPolls == 3) {
+        quietMode = false;
+        gfx->setBrightness(backlightDim ? 30 : 185);
+        sendLine("{\"cmd\":\"gesture\",\"gesture\":\"upright\",\"quiet\":false}");
+        chirp("ack");   // audible confirmation that sound is back
+        st.dirty = true;
+      }
+
+      // shake (unchanged thresholds)
+      if (delta > 0.65f && now - lastShakeMs > 1800) {
         lastShakeMs = now;
         sendLine("{\"cmd\":\"gesture\",\"gesture\":\"shake\"}");
         triggerNamedMood("shake", "happy");
         chirp("ack");
+      } else if (!quietMode && delta > 0.22f && delta <= 0.65f && now - lastShakeMs > 1800) {
+        // firm desk-knock pulse at 300ms sampling. Two pulses inside
+        // 150–1200ms = double-tap: ack/dismiss. // ponytail: polled detection;
+        // QMI8658 hardware tap-engine + INT if this proves flaky in practice
+        if (prevTapPulseMs && now - prevTapPulseMs >= 150 && now - prevTapPulseMs <= 1200) {
+          prevTapPulseMs = 0;
+          toastUntilMs = 0;             // dismiss active banner
+          approvalNagMuted = true;      // stop the 60s approval re-chirp
+          sendLine("{\"cmd\":\"gesture\",\"gesture\":\"tap2\"}");
+          triggerNamedMood("tap2", "blink");
+          st.dirty = true;
+        } else {
+          prevTapPulseMs = now;
+        }
+      }
+      if (prevTapPulseMs && now - prevTapPulseMs > 1200) prevTapPulseMs = 0;
+
+      // pick-up: first real motion after >2 min of stillness
+      if (delta > 0.18f && !quietMode && prevMotionMs &&
+          now - prevMotionMs > 120000 && now - lastShakeMs > 1800) {
+        lastPickupMs = now;
+        sendLine("{\"cmd\":\"gesture\",\"gesture\":\"pickup\"}");
+        triggerNamedMood("pickup", "happy");
       }
       lastAccelMag = mag;
     }
@@ -886,6 +942,7 @@ static void loadDisplayConfigFromSD() {
   if (!doc["display"]["rotation"].isNull()) applyRotation((uint8_t)(doc["display"]["rotation"] | 1));
   hostIp = String((const char*)(doc["host"]["ip"] | ""));
   hostPort = doc["host"]["port"] | 8767;
+  hostToken = String((const char*)(doc["host"]["token"] | ""));
 }
 
 static void initWiFiFromSD() {
@@ -1406,6 +1463,8 @@ static void applyJsonLine(const String &line) {
     if (!doc["host"]["ip"].isNull()) {
       hostIp = String((const char*)doc["host"]["ip"]);
       hostPort = doc["host"]["port"] | 8767;
+      if (!doc["host"]["token"].isNull())
+        hostToken = String((const char*)doc["host"]["token"]);
     }
     if (ok && !doc["wifi"].isNull()) initWiFiFromSD();
     return;
@@ -1414,6 +1473,8 @@ static void applyJsonLine(const String &line) {
     st.connected = true;
     st.lastSeenMs = millis();
     st.waiting = 1;
+    // host says Jason is on another surface — show it, but don't nag aloud
+    approvalNagMuted = doc["quiet"] | false;
     st.action.active = true;
     st.action.id = doc["id"] | "";
     st.action.text = doc["text"] | "Hermes needs approval";
@@ -1622,6 +1683,9 @@ void loop() {
       lastTcpTryMs = millis();
       if (tcpLink.connect(hostIp.c_str(), hostPort)) {
         tcpLine = "";
+        // authed transport: token must be the first line on the socket
+        if (hostToken.length())
+          sendLine(String("{\"type\":\"auth\",\"token\":\"") + hostToken + "\"}");
         sendLine("{\"hello\":\"hermes-buddy\",\"transport\":\"tcp\"}");
       }
     }
@@ -1654,18 +1718,28 @@ void loop() {
   }
 
   static uint8_t lastWaiting = 0;
-  if (st.waiting > 0 && lastWaiting == 0) chirp("alert");
+  if (st.waiting > 0 && lastWaiting == 0 && !approvalNagMuted) chirp("alert");
   lastWaiting = st.waiting > 0 ? 1 : 0;
 
-  // Gentle re-chirp every 60s while an approval sits unanswered.
+  // Gentle re-chirp every 60s while an approval sits unanswered —
+  // unless tap2 acked it or the host routed it quiet.
   static uint32_t lastWaitChirp = 0;
   if (st.waiting > 0) {
-    if (millis() - lastWaitChirp > 60000) {
+    if (millis() - lastWaitChirp > 60000 && !approvalNagMuted) {
       lastWaitChirp = millis();
       chirp("alert");
     }
   } else {
     lastWaitChirp = millis();
+    approvalNagMuted = false;   // next approval starts loud by default
+  }
+
+  // Telemetry heartbeat: battery, quiet, usb-alive — host routes and warns on it.
+  if (millis() - lastTelemetryMs > 60000) {
+    lastTelemetryMs = millis();
+    sendLine(String("{\"cmd\":\"telemetry\",\"bat\":") + String(batVolts, 2) +
+             ",\"quiet\":" + (quietMode ? "true" : "false") +
+             ",\"usb\":" + (usbAlive ? "true" : "false") + "}");
   }
 
   if (toastUntilMs && millis() >= toastUntilMs) {

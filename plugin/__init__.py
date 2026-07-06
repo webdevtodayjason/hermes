@@ -109,6 +109,35 @@ _stats = {"total": 0, "tokens_today": 0, "tools_today": 0, "at": 0.0}
 _link: SerialLink | None = None
 _jobs: _actions.JobManager | None = None
 
+# Presence: last real interaction per surface, so sound/voice land where
+# Jason actually is. usb/tcp origins = desk, ws = phone.
+_PRESENCE_WINDOW = 300.0                  # seconds; older than this = unknown
+_INTERACTION_CMDS = {"touch", "swipe", "deck", "permission", "action", "gesture", "msgs"}
+_presence = {"desk": 0.0, "phone": 0.0}
+_desk_quiet = False                       # device reported face-down
+_telemetry: dict = {}                     # last device telemetry frame
+_BATT_WARN_V = 3.5
+_BATT_CLEAR_V = 3.65                      # hysteresis: re-arm above this
+_batt_warned = False
+
+
+def _surface_of(origin: str) -> str:
+    return "phone" if origin == "ws" else "desk"
+
+
+def _active_surface() -> str | None:
+    """Surface with the freshest interaction inside the window; None = unknown
+    (be loud everywhere — silence by guess is worse than a spare chirp)."""
+    d, p = _presence["desk"], _presence["phone"]
+    best = max(d, p)
+    if not best or time.time() - best > _PRESENCE_WINDOW:
+        return None
+    return "desk" if d >= p else "phone"
+
+
+def _desk_should_be_quiet() -> bool:
+    return _desk_quiet or _active_surface() == "phone"
+
 
 def _tool_status(tool_name: str) -> str:
     if not tool_name:
@@ -168,8 +197,11 @@ def _maybe_push_pages() -> None:
     _pages["at"] = now
     try:
         _jobs.reload_if_changed()   # hot-reload the deck when the config file changes
+        bat = float(_telemetry.get("bat") or 0.0)
+        link_line = f"link:{_link.transport}" + (f" bat:{bat:.2f}V" if bat else "") \
+            + (" QUIET" if _desk_quiet else "")
         _link.send(_feeds.cron_page())
-        _link.send(_feeds.vitals_page(_started["at"], _stats))
+        _link.send(_feeds.vitals_page(_started["at"], _stats, link_line))
         _link.send(_feeds.fleet_page())
         _link.send(_actions.deck_frame(_jobs.actions))
     except Exception:
@@ -296,6 +328,8 @@ def _payload() -> dict:
             "entries": list(_entries)[:5],
             "tokens_today": _stats["tokens_today"],
             "tools_today": _stats["tools_today"],
+            "battery_v": round(float(_telemetry.get("bat") or 0.0), 2),
+            "transport": getattr(_link, "transport", "none") if _link is not None else "none",
             **jobs,
         }
 
@@ -375,9 +409,20 @@ def _on_pre_approval(command="", description="", session_key="", surface="", **k
     with _lock:
         _pending[str(session_key)] = text
     _set_msg(text)
-    _push({"type": "permission", "id": str(session_key), "text": text,
-           "detail": detail, "choices": ["once", "deny"]})
-    _say_async(f"Hermes needs an approval: {text}", only_while_pending=str(session_key))
+    frame = {"type": "permission", "id": str(session_key), "text": text,
+             "detail": detail, "choices": ["once", "deny"]}
+    desk_quiet = _desk_should_be_quiet()
+    if _link is not None:
+        desk_frame = dict(frame)
+        if desk_quiet:
+            desk_frame["quiet"] = True   # device shows it but skips the chirp+nag
+        _link.send(desk_frame, leg="desk")
+        _link.send(frame, leg="phone")
+    logger.info("familiar: approval route=%s desk_quiet=%s",
+                _active_surface() or "everywhere", desk_quiet)
+    _push()
+    if not desk_quiet:
+        _say_async(f"Hermes needs an approval: {text}", only_while_pending=str(session_key))
 
 
 def _on_post_approval(session_key="", choice="", **kw):
@@ -413,8 +458,25 @@ def _on_kanban_blocked(task_id="", reason="", **kw):
 # device -> host
 # --------------------------------------------------------------------------
 
-def _handle_device_line(evt: dict) -> None:
+def _handle_device_line(evt: dict, origin: str = "usb") -> None:
+    global _desk_quiet, _batt_warned
     cmd = evt.get("cmd") or evt.get("event")
+    if cmd in _INTERACTION_CMDS:
+        _presence[_surface_of(origin)] = time.time()
+    if cmd == "telemetry":
+        _telemetry.update(evt)
+        bat = float(evt.get("bat") or 0.0)
+        on_usb = bool(evt.get("usb", True))
+        if _desk_quiet != bool(evt.get("quiet")):
+            _desk_quiet = bool(evt.get("quiet"))   # resync if a gesture frame was missed
+        if not on_usb and 0.0 < bat < _BATT_WARN_V and not _batt_warned:
+            _batt_warned = True
+            logger.info("familiar: LOW BATTERY %.2fV (untethered) — warning once", bat)
+            _push({"type": "notify", "msg": f"Familiar battery low: {bat:.2f}V — plug me in",
+                   "sound": "alert"})
+        elif (on_usb or bat >= _BATT_CLEAR_V) and _batt_warned:
+            _batt_warned = False   # crossing cleared; re-arm
+        return
     if cmd == "deck":
         try:
             i = int(evt.get("i", -1))
@@ -482,8 +544,22 @@ def _handle_device_line(evt: dict) -> None:
     if cmd == "touch":
         _maybe_morning()
         return
-    if cmd == "gesture" and evt.get("gesture") == "shake":
-        _push({"type": "event", "event": "gesture", "msg": "shake — Familiar is awake"})
+    if cmd == "gesture":
+        g = str(evt.get("gesture") or "")
+        if g == "shake":
+            _push({"type": "event", "event": "gesture", "msg": "shake — Familiar is awake"})
+        elif g in ("facedown", "upright"):
+            _desk_quiet = bool(evt.get("quiet"))
+            logger.info("familiar: desk %s — quiet=%s", g, _desk_quiet)
+            # phones see the mode flip in their feed; desk shows nothing extra
+            if _link is not None:
+                _link.send({"type": "event", "event": "message", "role": "assistant",
+                            "msg": "desk muted (face-down)" if _desk_quiet else "desk live again"},
+                           leg="phone")
+        elif g == "tap2":
+            logger.info("familiar: desk tap2 — toast/nag acknowledged")
+        elif g == "pickup":
+            logger.info("familiar: desk pickup — Jason is at the desk")
         return
     if cmd is None:
         # boot lines, wifi status, say errors ({"say":"http--1"}) — surface them
@@ -533,6 +609,8 @@ def _say_async(text: str, only_while_pending: str | None = None) -> None:
     """
     if not _voice_enabled or _link is None:
         return
+    if _desk_should_be_quiet():
+        return   # face-down, or Jason is on the phone — no desk voice
 
     def _work():
         url = _say_url(text)
@@ -570,16 +648,26 @@ def _tool_notify(args=None, **kw) -> str:
         sound = "none"   # quiet hours: banner still lands, silently
     frame = {"type": "notify", "msg": msg, "sound": sound}
     spoke = False
-    if args.get("speak"):
+    desk_quiet = _desk_should_be_quiet()
+    if args.get("speak") and not desk_quiet:
         url = _say_url(msg)
         if url:
             frame["say"] = url
             frame["sound"] = "none"   # the voice replaces the chirp
             spoke = True
-    _link.send(frame)
+    # presence routing: loud only where Jason is; other surfaces get the
+    # banner silently. Unknown presence = loud everywhere.
+    desk_frame = dict(frame)
+    if desk_quiet:
+        desk_frame["sound"] = "none"
+        desk_frame.pop("say", None)
+    _link.send(desk_frame, leg="desk")
+    _link.send(frame, leg="phone")
     with _lock:
         _entries.appendleft(f"{datetime.now().strftime('%H:%M')} !: {_actions.compact(msg, 70)}")
-    logger.info("push: notify len=%d sound=%s say=%s", len(msg), frame["sound"], frame.get("say", "-"))
+    logger.info("push: notify len=%d sound=%s say=%s route=%s desk_quiet=%s",
+                len(msg), frame["sound"], frame.get("say", "-"),
+                _active_surface() or "everywhere", desk_quiet)
     return tool_result(success=True, delivered=msg, spoke=spoke)
 
 

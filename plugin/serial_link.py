@@ -50,9 +50,10 @@ def _find_esptool() -> str | None:
 
 
 class SerialLink:
-    """Owns the serial port. ``on_line(dict)`` is called from the link thread
-    for every JSON line the device sends; ``make_heartbeat()`` (if given) must
-    return a dict to transmit every ``heartbeat`` seconds while connected."""
+    """Owns the serial port. ``on_line(dict, origin)`` is called from the link
+    thread for every JSON line a client sends (origin: "usb" | "tcp" | "ws");
+    ``make_heartbeat()`` (if given) must return a dict to transmit every
+    ``heartbeat`` seconds while connected."""
 
     def __init__(self, on_line, port: str | None = None, baud: int = 115200,
                  heartbeat: float = 5.0, make_heartbeat=None):
@@ -91,17 +92,23 @@ class SerialLink:
             return "+".join([f"usb:{self.port}"] + kinds)
         return "+".join(kinds) if kinds else "none"
 
-    def send(self, obj: dict) -> None:
-        """Queue a frame for the device. Never blocks; drops oldest on overflow."""
+    def send(self, obj: dict, leg: str | None = None) -> None:
+        """Queue a frame. Never blocks; drops oldest on overflow.
+
+        leg: None = every surface; "desk" = USB serial + device-over-TCP;
+        "phone" = WS clients only. Lets the host send per-surface variants
+        (e.g. a silent notify to the desk while the phone gets the loud one).
+        """
+        item = (leg, obj)
         try:
-            self._q.put_nowait(obj)
+            self._q.put_nowait(item)
         except queue.Full:
             try:
                 self._q.get_nowait()
             except queue.Empty:
                 pass
             try:
-                self._q.put_nowait(obj)
+                self._q.put_nowait(item)
             except queue.Full:
                 pass
 
@@ -174,7 +181,7 @@ class SerialLink:
                             continue
                         if isinstance(evt, dict):
                             try:
-                                link._on_line(evt)
+                                link._on_line(evt, "tcp")
                             except Exception:
                                 logger.exception("familiar tcp on_line failed")
                 finally:
@@ -238,7 +245,7 @@ class SerialLink:
                         continue
                     if isinstance(evt, dict):
                         try:
-                            link._on_line(evt)
+                            link._on_line(evt, "ws")
                         except Exception:
                             logger.exception("familiar ws on_line failed")
             except Exception:
@@ -258,11 +265,15 @@ class SerialLink:
                     "" if token else " (NO TOKEN — open)")
         return bound
 
-    def _net_send(self, data: bytes) -> bool:
+    _LEG_KINDS = {None: ("tcp", "ws"), "desk": ("tcp",), "phone": ("ws",)}
+
+    def _net_send(self, data: bytes, kinds=("tcp", "ws")) -> bool:
         with self._net_lock:
             clients = list(self._net_clients)
         sent = False
         for kind, send_fn in clients:
+            if kind not in kinds:
+                continue
             try:
                 send_fn(data)
                 sent = True
@@ -385,10 +396,11 @@ class SerialLink:
                     # no USB — drain the queue to network clients only
                     while not self._q.empty():
                         try:
-                            obj = self._q.get_nowait()
+                            leg, obj = self._q.get_nowait()
                         except queue.Empty:
                             break
-                        self._net_send((json.dumps(obj, separators=(",", ":")) + "\n").encode())
+                        self._net_send((json.dumps(obj, separators=(",", ":")) + "\n").encode(),
+                                       self._LEG_KINDS.get(leg, ("tcp", "ws")))
                     now = time.time()
                     if self._make_heartbeat and self._net_clients and now - self._last_net_beat >= self._heartbeat:
                         self._last_net_beat = now
@@ -400,15 +412,16 @@ class SerialLink:
                 buf = b""
                 last_beat = 0.0
             try:
-                # outbound — serial plus every network surface
+                # outbound — serial plus every network surface (leg-filtered)
                 while True:
                     try:
-                        obj = self._q.get_nowait()
+                        leg, obj = self._q.get_nowait()
                     except queue.Empty:
                         break
                     data = (json.dumps(obj, separators=(",", ":")) + "\n").encode()
-                    self._ser.write(data)
-                    self._net_send(data)
+                    if leg in (None, "desk"):
+                        self._ser.write(data)
+                    self._net_send(data, self._LEG_KINDS.get(leg, ("tcp", "ws")))
                 self._ser.flush()
                 # heartbeat
                 now = time.time()
@@ -432,7 +445,7 @@ class SerialLink:
                             evt = None
                         if isinstance(evt, dict):
                             try:
-                                self._on_line(evt)
+                                self._on_line(evt, "usb")
                             except Exception:
                                 logger.exception("familiar on_line handler failed")
             except Exception:

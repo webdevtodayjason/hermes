@@ -33,7 +33,7 @@ def wait_for(cond, timeout=3.0):
 
 def make_link():
     seen: list[dict] = []
-    link = SerialLink(seen.append)
+    link = SerialLink(lambda evt, origin=None: seen.append(evt))
     return link, seen
 
 
