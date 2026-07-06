@@ -764,8 +764,21 @@ static void initPowerDiagnostics() {
 }
 
 static bool qmiConfig() {
-  // Byte-faithful mirror of the Waveshare demo's working init (no reset,
-  // enable-first order). Returns true when every write read-back-verifies.
+  // Verified soft reset first: demo boards get power-cycled between runs,
+  // but our LiPo keeps the QMI powered across every ESP32 reboot, and the
+  // chip demonstrably degrades across warm restarts (NACK-storms within
+  // seconds) until properly reset. RST_RESULT (0x4D) must read 0x80 —
+  // never a blind delay (the blind version is what wedged it originally).
+  i2cWrite8(activeQmiAddr, 0x60, 0xB0);
+  bool booted = false;
+  for (uint32_t t0 = millis(); millis() - t0 < 2000;) {
+    uint8_t r = 0;
+    if (i2cRead8(activeQmiAddr, 0x4D, &r) && r == 0x80) { booted = true; break; }
+    delay(10);
+  }
+  if (!booted) return false;
+  // Then the byte-faithful mirror of the demo's working config
+  // (enable-first order). True when every write read-back-verifies.
   uint8_t c1 = 0;
   i2cRead8(activeQmiAddr, 0x02, &c1);
   c1 = (c1 & 0xFE) | 0x40;                  // osc on + addr auto-increment
@@ -825,7 +838,8 @@ static void pollPeripheralSensors() {
   uint32_t now = millis();
   if (now - lastSensorMs < 300) return;
   lastSensorMs = now;
-  batVolts = analogReadMilliVolts(BAT_ADC_PIN) * 2.0f * BAT_MEASUREMENT_OFFSET / 1000.0f;
+  // demo BAT_Driver formula: 3:1 divider, divide by calibration offset
+  batVolts = analogReadMilliVolts(BAT_ADC_PIN) * 3.0f / 1000.0f / BAT_MEASUREMENT_OFFSET;
   wifiReady = WiFi.status() == WL_CONNECTED;
   if (wifiReady) wifiStatus = String("WiFi:") + WiFi.localIP().toString();
   if (rtcReady) {
