@@ -144,6 +144,9 @@ static bool imuReady = false;
 static bool imuCfgOk = false;   // config writes verified by read-back
 static uint8_t imuStatus0 = 0;  // last STATUS0 (bit0 = accel data ready)
 static uint8_t imuRev = 0;      // revision reg 0x01 (expect 0x7C/0x7B)
+static uint16_t imuReadFails = 0;  // consecutive burst-read failures
+static uint16_t imuRecovers = 0;   // successful runtime re-inits
+static uint8_t imuWhoNow = 0;      // WHO_AM_I at last recovery probe
 static bool rtcReady = false;
 static bool wifiReady = false;
 static String wifiStatus = "WiFi:off";
@@ -754,6 +757,29 @@ static void initPowerDiagnostics() {
   batVolts = analogReadMilliVolts(BAT_ADC_PIN) * 2.0f * BAT_MEASUREMENT_OFFSET / 1000.0f;
 }
 
+static bool qmiConfig() {
+  // Byte-faithful mirror of the Waveshare demo's working init (no reset,
+  // enable-first order). Returns true when every write read-back-verifies.
+  uint8_t c1 = 0;
+  i2cRead8(activeQmiAddr, 0x02, &c1);
+  c1 = (c1 & 0xFE) | 0x40;                  // osc on + addr auto-increment
+  i2cWrite8(activeQmiAddr, 0x02, c1);       // CTRL1
+  const uint8_t seq[][2] = {
+      {0x08, 0x43},   // CTRL7: hs-clock | gEN | aEN — demo enables FIRST
+      {0x07, 0x00},   // CTRL6: AttitudeEngine MOD off
+      {0x03, 0x10},   // CTRL2: accel ±4g @ 8000Hz (demo defaults)
+      {0x04, 0x20},   // CTRL3: gyro ±64dps @ 8000Hz (demo defaults)
+      {0x06, 0x71},   // CTRL5: gyro LPF mode3 + accel LPF mode0, both ON
+  };
+  bool ok = true;
+  for (auto &s : seq) {
+    i2cWrite8(activeQmiAddr, s[0], s[1]);
+    uint8_t r = 0xFF;
+    if (!i2cRead8(activeQmiAddr, s[0], &r) || r != s[1]) ok = false;
+  }
+  return ok;
+}
+
 static void initMotionAndRtc() {
   // Wire is already bound to the hunt's winning pins by buildI2cScan()
   // QMI8658 bring-up: byte-faithful mirror of Waveshare's shipped demo for
@@ -772,23 +798,7 @@ static void initMotionAndRtc() {
     }
   }
   if (imuReady) {
-    uint8_t c1 = 0;
-    i2cRead8(activeQmiAddr, 0x02, &c1);
-    c1 = (c1 & 0xFE) | 0x40;                  // osc on + addr auto-increment
-    i2cWrite8(activeQmiAddr, 0x02, c1);       // CTRL1
-    const uint8_t seq[][2] = {
-        {0x08, 0x43},   // CTRL7: hs-clock | gEN | aEN — demo enables FIRST
-        {0x07, 0x00},   // CTRL6: AttitudeEngine MOD off
-        {0x03, 0x10},   // CTRL2: accel ±4g @ 8000Hz (demo defaults)
-        {0x04, 0x20},   // CTRL3: gyro ±64dps @ 8000Hz (demo defaults)
-        {0x06, 0x71},   // CTRL5: gyro LPF mode3 + accel LPF mode0, both ON
-    };
-    imuCfgOk = true;
-    for (auto &s : seq) {
-      i2cWrite8(activeQmiAddr, s[0], s[1]);
-      uint8_t r = 0xFF;
-      if (!i2cRead8(activeQmiAddr, s[0], &r) || r != s[1]) imuCfgOk = false;
-    }
+    imuCfgOk = qmiConfig();
     i2cRead8(activeQmiAddr, 0x02, &rb[0]);
     i2cRead8(activeQmiAddr, 0x03, &rb[1]);
     i2cRead8(activeQmiAddr, 0x08, &rb[2]);
@@ -824,8 +834,27 @@ static void pollPeripheralSensors() {
     uint8_t st0 = 0;
     i2cRead8(activeQmiAddr, 0x2E, &st0);   // STATUS0 — diagnostic only; the
     imuStatus0 = st0;                      // demo reads outputs unconditionally
+    // Self-heal: the chip has been seen answering at boot then dropping off
+    // the bus within a minute. ~6s of consecutive failures -> recover the
+    // Wire bus, re-probe identity, re-run the demo init. Retries forever.
+    if (imuReadFails >= 20) {
+      imuReadFails = 0;
+      Wire.end();
+      delay(5);
+      Wire.begin(sensSda, sensScl);
+      delay(5);
+      imuWhoNow = 0;
+      i2cRead8(activeQmiAddr, 0x00, &imuWhoNow);
+      if (imuWhoNow == 0x05 && qmiConfig()) {
+        imuRecovers++;
+        Serial.printf("{\"imu_recover\":%u}\n", imuRecovers);
+      }
+    }
     uint8_t raw[6] = {0};
-    if (i2cReadBytes(activeQmiAddr, 0x35, raw, 6)) {
+    if (!i2cReadBytes(activeQmiAddr, 0x35, raw, 6)) {
+      imuReadFails++;
+    } else {
+      imuReadFails = 0;
       int16_t ax = (int16_t)((raw[1] << 8) | raw[0]);
       int16_t ay = (int16_t)((raw[3] << 8) | raw[2]);
       int16_t az = (int16_t)((raw[5] << 8) | raw[4]);
@@ -1929,6 +1958,8 @@ void loop() {
              ",\"imu_cfg\":" + (imuCfgOk ? "true" : "false") +
              ",\"imu\":" + (imuReady ? "true" : "false") +
              ",\"st0\":" + String(imuStatus0) + ",\"rev\":" + String(imuRev) +
+             ",\"fails\":" + String(imuReadFails) + ",\"rec\":" + String(imuRecovers) +
+             ",\"who_now\":" + String(imuWhoNow) +
              ",\"scan\":" + i2cScanReport + "}");
   }
 
