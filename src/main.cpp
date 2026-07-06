@@ -626,12 +626,17 @@ static bool i2cRead8(uint8_t addr, uint8_t reg, uint8_t* value) {
   return true;
 }
 
+static uint8_t i2cLastErr = 0;   // endTransmission code, or 10+n for short reads
+
 static bool i2cReadBytes(uint8_t addr, uint8_t reg, uint8_t* data, size_t len) {
   Wire.beginTransmission(addr);
   Wire.write(reg);
-  if (Wire.endTransmission(true) != 0) return false;
-  if (Wire.requestFrom((int)addr, (int)len) != len) return false;
+  uint8_t e = Wire.endTransmission(true);
+  if (e != 0) { i2cLastErr = e; return false; }
+  size_t n = Wire.requestFrom((int)addr, (int)len);
+  if (n != len) { i2cLastErr = 10 + n; return false; }
   for (size_t i = 0; i < len; ++i) data[i] = Wire.read();
+  i2cLastErr = 0;
   return true;
 }
 
@@ -852,7 +857,15 @@ static void pollPeripheralSensors() {
       }
     }
     uint8_t raw[6] = {0};
-    if (!i2cReadBytes(activeQmiAddr, 0x35, raw, 6)) {
+    bool got = i2cReadBytes(activeQmiAddr, 0x35, raw, 6);
+    if (!got) {
+      // burst failed — singles have been observed to work when bursts
+      // don't, so fall back to per-register reads before declaring a miss
+      got = true;
+      for (uint8_t i = 0; i < 6 && got; i++)
+        got = i2cRead8(activeQmiAddr, 0x35 + i, &raw[i]);
+    }
+    if (!got) {
       imuReadFails++;
     } else {
       imuReadFails = 0;
@@ -1959,7 +1972,7 @@ void loop() {
              ",\"imu\":" + (imuReady ? "true" : "false") +
              ",\"st0\":" + String(imuStatus0) + ",\"rev\":" + String(imuRev) +
              ",\"fails\":" + String(imuReadFails) + ",\"rec\":" + String(imuRecovers) +
-             ",\"who_now\":" + String(imuWhoNow) +
+             ",\"who_now\":" + String(imuWhoNow) + ",\"ferr\":" + String(i2cLastErr) +
              ",\"scan\":" + i2cScanReport + "}");
   }
 
