@@ -750,40 +750,32 @@ static void initPowerDiagnostics() {
 
 static void initMotionAndRtc() {
   // Wire is already bound to the hunt's winning pins by buildI2cScan()
-  // QMI8658 bring-up per QST datasheet + SensorLib + Waveshare demo:
-  //  - after RESET (0x60=0xB0) the chip ACKs writes but DISCARDS them until
-  //    RST_RESULT (0x4D) reads 0x80 — poll it, never blind-delay. A chip
-  //    caught mid-boot stays wedged until FULL power-off (it survives ESP32
-  //    reflash/reset; with no battery attached, a USB unplug power-cycles it).
-  //  - identity must be WHO_AM_I (0x00) == 0x05; an I2C ACK can be a stranger.
-  //  - config with sensors OFF, enable accel+gyro LAST (accel-only 0x01 is a
-  //    known bad mode: half-scale/zero output — SensorLib issue #2).
+  // QMI8658 bring-up: byte-faithful mirror of Waveshare's shipped demo for
+  // THIS board (~/Projects/waveshare-esp32s3-touch-lcd-28 Gyro_QMI8658.cpp),
+  // which is the only sequence proven to produce data here. Notably the demo
+  // NEVER soft-resets (an interrupted reset wedges the chip until full
+  // power-off) and enables CTRL7 BEFORE writing scale/ODR/LPF config.
   uint8_t who = 0;
   uint8_t rb[3] = {0xFF, 0xFF, 0xFF};
   imuReady = false;
   for (uint8_t addr : {(uint8_t)0x6B, (uint8_t)0x6A}) {
-    i2cWrite8(addr, 0x60, 0xB0);              // RESET
-    bool booted = false;
-    for (uint32_t t0 = millis(); millis() - t0 < 2000;) {
-      uint8_t r = 0;
-      if (i2cRead8(addr, 0x4D, &r) && r == 0x80) { booted = true; break; }
-      delay(10);
-    }
-    if (booted && i2cRead8(addr, 0x00, &who) && who == 0x05) {
+    if (i2cRead8(addr, 0x00, &who) && who == 0x05) {   // WHO_AM_I gate
       imuReady = true;
       activeQmiAddr = addr;
       break;
     }
   }
   if (imuReady) {
-    // ±8g -> 4096 LSB/g (poll loop divides accordingly); gyro ±512dps.
+    uint8_t c1 = 0;
+    i2cRead8(activeQmiAddr, 0x02, &c1);
+    c1 = (c1 & 0xFE) | 0x40;                  // osc on + addr auto-increment
+    i2cWrite8(activeQmiAddr, 0x02, c1);       // CTRL1
     const uint8_t seq[][2] = {
-        {0x02, 0x40},   // CTRL1: addr auto-increment, little-endian
-        {0x08, 0x00},   // CTRL7: everything off while configuring (stale state survives warm resets)
-        {0x03, 0x23},   // CTRL2: accel ±8g @ ~900Hz
-        {0x04, 0x43},   // CTRL3: gyro ±512dps (Waveshare demo default)
-        {0x06, 0x00},   // CTRL5: LPFs off
-        {0x08, 0x43},   // CTRL7: aEN|gEN|hs-clock — Waveshare's exact shipped value
+        {0x08, 0x43},   // CTRL7: hs-clock | gEN | aEN — demo enables FIRST
+        {0x07, 0x00},   // CTRL6: AttitudeEngine MOD off
+        {0x03, 0x10},   // CTRL2: accel ±4g @ 8000Hz (demo defaults)
+        {0x04, 0x20},   // CTRL3: gyro ±64dps @ 8000Hz (demo defaults)
+        {0x06, 0x71},   // CTRL5: gyro LPF mode3 + accel LPF mode0, both ON
     };
     imuCfgOk = true;
     for (auto &s : seq) {
@@ -795,7 +787,7 @@ static void initMotionAndRtc() {
     i2cRead8(activeQmiAddr, 0x03, &rb[1]);
     i2cRead8(activeQmiAddr, 0x08, &rb[2]);
     i2cRead8(activeQmiAddr, 0x01, &imuRev);
-    delay(160);   // gyro turn-on time; outputs are legitimately zero before this
+    delay(20);
   }
   uint8_t rtcprobe = 0;
   rtcReady = i2cRead8(PCF85063_ADDR, 0x04, &rtcprobe);
@@ -824,16 +816,16 @@ static void pollPeripheralSensors() {
   }
   if (imuReady) {
     uint8_t st0 = 0;
-    i2cRead8(activeQmiAddr, 0x2E, &st0);   // STATUS0: bit0 accel data ready
-    imuStatus0 = st0;
+    i2cRead8(activeQmiAddr, 0x2E, &st0);   // STATUS0 — diagnostic only; the
+    imuStatus0 = st0;                      // demo reads outputs unconditionally
     uint8_t raw[6] = {0};
-    if ((st0 & 0x01) && i2cReadBytes(activeQmiAddr, 0x35, raw, 6)) {
+    if (i2cReadBytes(activeQmiAddr, 0x35, raw, 6)) {
       int16_t ax = (int16_t)((raw[1] << 8) | raw[0]);
       int16_t ay = (int16_t)((raw[3] << 8) | raw[2]);
       int16_t az = (int16_t)((raw[5] << 8) | raw[4]);
-      accelX = ax / 4096.0f;   // CTRL2 0x23 = ±8g -> 4096 LSB/g
-      accelY = ay / 4096.0f;
-      accelZ = az / 4096.0f;
+      accelX = ax / 8192.0f;   // CTRL2 0x10 = ±4g -> 8192 LSB/g
+      accelY = ay / 8192.0f;
+      accelZ = az / 8192.0f;
       float mag = sqrtf(accelX * accelX + accelY * accelY + accelZ * accelZ);
       float delta = fabsf(mag - lastAccelMag);
       uint32_t prevMotionMs = lastMotionMs;    // before this sample
