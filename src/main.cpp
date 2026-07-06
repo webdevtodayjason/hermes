@@ -142,6 +142,8 @@ static String sdStatus = "SD:checking";
 static bool audioReady = false;
 static bool imuReady = false;
 static bool imuCfgOk = false;   // config writes verified by read-back
+static uint8_t imuStatus0 = 0;  // last STATUS0 (bit0 = accel data ready)
+static uint8_t imuRev = 0;      // revision reg 0x01 (expect 0x7C/0x7B)
 static bool rtcReady = false;
 static bool wifiReady = false;
 static String wifiStatus = "WiFi:off";
@@ -781,7 +783,7 @@ static void initMotionAndRtc() {
         {0x03, 0x23},   // CTRL2: accel ±8g @ ~900Hz
         {0x04, 0x43},   // CTRL3: gyro ±512dps (Waveshare demo default)
         {0x06, 0x00},   // CTRL5: LPFs off
-        {0x08, 0x03},   // CTRL7: aEN|gEN — enable LAST
+        {0x08, 0x43},   // CTRL7: aEN|gEN|hs-clock — Waveshare's exact shipped value
     };
     imuCfgOk = true;
     for (auto &s : seq) {
@@ -792,6 +794,7 @@ static void initMotionAndRtc() {
     i2cRead8(activeQmiAddr, 0x02, &rb[0]);
     i2cRead8(activeQmiAddr, 0x03, &rb[1]);
     i2cRead8(activeQmiAddr, 0x08, &rb[2]);
+    i2cRead8(activeQmiAddr, 0x01, &imuRev);
     delay(160);   // gyro turn-on time; outputs are legitimately zero before this
   }
   uint8_t rtcprobe = 0;
@@ -820,8 +823,11 @@ static void pollPeripheralSensors() {
     }
   }
   if (imuReady) {
+    uint8_t st0 = 0;
+    i2cRead8(activeQmiAddr, 0x2E, &st0);   // STATUS0: bit0 accel data ready
+    imuStatus0 = st0;
     uint8_t raw[6] = {0};
-    if (i2cReadBytes(activeQmiAddr, 0x35, raw, 6)) {
+    if ((st0 & 0x01) && i2cReadBytes(activeQmiAddr, 0x35, raw, 6)) {
       int16_t ax = (int16_t)((raw[1] << 8) | raw[0]);
       int16_t ay = (int16_t)((raw[3] << 8) | raw[2]);
       int16_t az = (int16_t)((raw[5] << 8) | raw[4]);
@@ -1868,6 +1874,7 @@ void loop() {
              ",\"base\":" + (baseSet ? "true" : "false") +
              ",\"imu_cfg\":" + (imuCfgOk ? "true" : "false") +
              ",\"imu\":" + (imuReady ? "true" : "false") +
+             ",\"st0\":" + String(imuStatus0) + ",\"rev\":" + String(imuRev) +
              ",\"scan\":" + i2cScanReport + "}");
   }
 
