@@ -87,7 +87,7 @@ class SerialLink:
     @property
     def transport(self) -> str:
         with self._net_lock:
-            kinds = sorted({k for k, _ in self._net_clients})
+            kinds = sorted({k for k, _s, _p in self._net_clients})
         if self._ser is not None:
             return "+".join([f"usb:{self.port}"] + kinds)
         return "+".join(kinds) if kinds else "none"
@@ -134,13 +134,18 @@ class SerialLink:
         return (isinstance(evt, dict) and evt.get("type") == "auth"
                 and hmac.compare_digest(str(evt.get("token") or ""), token))
 
-    def _net_add(self, kind: str, sender) -> None:
+    def _net_add(self, kind: str, sender, peer: str = "") -> None:
         with self._net_lock:
-            self._net_clients.append((kind, sender))
+            self._net_clients.append((kind, sender, peer))
 
     def _net_del(self, sender) -> None:
         with self._net_lock:
             self._net_clients = [c for c in self._net_clients if c[1] is not sender]
+
+    def peers(self) -> list:
+        """[(kind, peer), …] for connected network surfaces."""
+        with self._net_lock:
+            return [(k, p) for k, _s, p in self._net_clients]
 
     def _send_welcome(self, sender) -> None:
         cb = self.on_client
@@ -170,7 +175,7 @@ class SerialLink:
 
                 if token:
                     sender(b'{"type":"auth","ok":true}\n')
-                link._net_add("tcp", sender)
+                link._net_add("tcp", sender, peer)
                 link._send_welcome(sender)
                 logger.info("familiar connected via tcp %s", peer)
                 try:
@@ -234,7 +239,7 @@ class SerialLink:
             def sender(data: bytes) -> None:
                 conn.send(data.decode("utf-8"))
 
-            link._net_add("ws", sender)
+            link._net_add("ws", sender, peer)
             link._send_welcome(sender)
             logger.info("familiar connected via ws %s", peer)
             try:
@@ -271,7 +276,7 @@ class SerialLink:
         with self._net_lock:
             clients = list(self._net_clients)
         sent = False
-        for kind, send_fn in clients:
+        for kind, send_fn, _peer in clients:
             if kind not in kinds:
                 continue
             try:

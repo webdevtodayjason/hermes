@@ -405,7 +405,8 @@ def _on_post_llm(assistant_response="", platform="", session_id="", **kw):
 
 def _on_pre_approval(command="", description="", session_key="", surface="", **kw):
     text = _actions.compact(str(description or command or "Hermes needs approval"), 100)
-    detail = _actions.compact(str(command or ""), 190) if description and command else ""
+    # 360 fills the device's detail page (8 wrapped rows); RX buffer is 2048
+    detail = _actions.compact(str(command or ""), 360) if description and command else ""
     with _lock:
         _pending[str(session_key)] = text
     _set_msg(text)
@@ -465,6 +466,22 @@ def _handle_device_line(evt: dict, origin: str = "usb") -> None:
         _presence[_surface_of(origin)] = time.time()
     if cmd == "diag":
         logger.info("familiar: diag %s", evt)
+        return
+    if cmd in ("stats", "net") and _link is not None:
+        # transient drill-down pages, replied only to the surface that asked
+        leg = "phone" if origin == "ws" else "desk"
+        if cmd == "stats":
+            page = _feeds.stats_page(_stats, _jobs.status() if _jobs else {},
+                                     _telemetry, getattr(_link, "transport", "none"),
+                                     _started["at"])
+        else:
+            with _lock:
+                pres = dict(_presence)
+            page = _feeds.surfaces_page(pres, _link.peers(),
+                                        getattr(_link, "transport", "none"),
+                                        _active_surface())
+        _link.send(page, leg=leg)
+        logger.info("familiar: %s page -> %s", cmd, leg)
         return
     if cmd == "telemetry":
         logger.info("familiar: telemetry %s", evt)   # once/min; remote calibration eyes

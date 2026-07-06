@@ -43,10 +43,14 @@ class FakeLink:
     def __init__(self):
         self.sent: list[dict] = []
         self.legs: list = []   # parallel to sent: None | "desk" | "phone"
+        self.fake_peers: list = []
 
     def send(self, obj, leg=None):
         self.sent.append(obj)
         self.legs.append(leg)
+
+    def peers(self):
+        return list(self.fake_peers)
 
     def frames(self, type_, leg="any"):
         return [f for f, l in zip(self.sent, self.legs)
@@ -389,3 +393,43 @@ def test_state_frame_carries_battery_and_transport(wired):
     frame = familiar._payload()
     assert frame["battery_v"] == 4.02
     assert frame["transport"] == "usb:/dev/fake"
+
+
+# -- transient drill-down pages (touch-interactivity pass, 2026-07-06) -------
+
+def test_stats_tap_returns_transient_page_to_desk(wired):
+    _, link = wired
+    familiar._handle_device_line({"cmd": "stats"})
+    pages = link.frames("page", leg="desk")
+    assert pages and pages[-1]["slot"] == 9
+    assert pages[-1]["title"] == "STATS"
+    assert len(pages[-1]["lines"]) == 3
+    assert len(json.dumps(pages[-1])) < 300   # frame discipline
+
+
+def test_stats_from_phone_replies_to_phone(wired):
+    _, link = wired
+    familiar._handle_device_line({"cmd": "stats"}, origin="ws")
+    assert link.frames("page", leg="phone")[-1]["title"] == "STATS"
+    assert not link.frames("page", leg="desk")
+
+
+def test_net_tap_returns_surfaces_page(wired):
+    _, link = wired
+    link.fake_peers = [("ws", "100.91.145.90:51234")]
+    familiar._handle_device_line({"cmd": "deck", "i": 9}, origin="ws")  # phone presence
+    familiar._handle_device_line({"cmd": "net"})
+    page = link.frames("page", leg="desk")[-1]
+    assert page["slot"] == 9 and page["title"] == "SURFACES"
+    assert "100.91.145.90" in page["lines"][1]
+    assert "phone" in page["lines"][2]         # presence routes to phone
+    assert len(json.dumps(page)) < 300
+
+
+def test_approval_detail_survives_to_360(wired):
+    ctx, link = wired
+    cmd = "rm -rf " + " ".join(f"/tmp/dir{i}" for i in range(60))
+    ctx.hooks["pre_approval_request"](command=cmd, description="Big delete",
+                                      session_key="sk-detail")
+    perm = link.frames("permission", leg="desk")[-1]
+    assert 300 < len(perm["detail"]) <= 360    # no longer truncated at 190

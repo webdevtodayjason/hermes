@@ -83,6 +83,49 @@ def vitals_page(started_at: float, stats: dict, link_line: str = "") -> dict:
     return {"type": "page", "slot": 1, "title": "GATEWAY", "lines": lines}
 
 
+def _age(ts: float) -> str:
+    if not ts:
+        return "never"
+    s = max(0, int(time.time() - ts))
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m"
+    return f"{s // 3600}h"
+
+
+def stats_page(stats: dict, jobs: dict, telemetry: dict, transport: str,
+               started_at: float) -> dict:
+    """On-demand drill-down for a vitals-column tap (transient slot 9)."""
+    up = max(0, int(time.time() - started_at))
+    upstr = f"{up // 3600}h{(up % 3600) // 60:02d}m" if up >= 3600 else f"{up // 60}m"
+    tok = int(stats.get("tokens_today", 0))
+    tokstr = f"{tok / 1000:.0f}k" if tok >= 1000 else str(tok)
+    job = f"job {jobs.get('job_state', 'idle')} {jobs.get('job_label', '')}".strip()
+    bat = float(telemetry.get("bat") or 0.0)
+    link = f"up {upstr}  {transport}" + (f"  bat:{bat:.2f}V" if bat else "")
+    return {"type": "page", "slot": 9, "title": "STATS", "lines": [
+        _fit(f"S:{stats.get('total', 0)}  tok:{tokstr}  tools:{stats.get('tools_today', 0)}"),
+        _fit(job),
+        _fit(link),
+    ]}
+
+
+def surfaces_page(presence: dict, peers: list, transport: str,
+                  active: str | None) -> dict:
+    """Who's connected where + where sound routes (transient slot 9)."""
+    ws = [p for k, p in peers if k == "ws"]
+    tcp = [p for k, p in peers if k == "tcp"]
+    desk_via = "usb" if "usb" in transport else ("tcp" if tcp else "-")
+    phone_ip = ws[0].split(":")[0] if ws else "-"
+    extra = f" +{len(ws) - 1}" if len(ws) > 1 else ""
+    return {"type": "page", "slot": 9, "title": "SURFACES", "lines": [
+        _fit(f"desk {desk_via}  touched {_age(presence.get('desk', 0.0))}"),
+        _fit(f"phone ws {phone_ip}{extra}  touched {_age(presence.get('phone', 0.0))}"),
+        _fit(f"sound routes -> {active or 'everywhere'}"),
+    ]}
+
+
 def fleet_page() -> dict:
     """Kanban worker fleet at a glance (slot 2). Degrades to 'idle' text."""
     db = _home() / "kanban.db"

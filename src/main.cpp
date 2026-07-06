@@ -260,6 +260,12 @@ struct HostPage {
   bool set = false;
 };
 static HostPage hostPages[3];   // 0 cron, 1 gateway vitals, 2 fleet
+// Transient page (host slot 9, or local approval detail): drawn over any
+// tab; the next tap closes it and returns to where you were.
+static HostPage modal;
+static String modalBody;        // long-text mode (approval detail)
+static bool modalActive = false;
+static UiPage modalReturn = PAGE_FACE;
 
 // THE DECK: host-defined programmable buttons on the OPS tab (3x2 grid).
 // confirm-flagged buttons arm on first tap ("SURE?") and fire on the second.
@@ -1161,7 +1167,24 @@ static void redraw() {
 
   drawTabBar(mood);
 
-  if (uiPage == PAGE_FACE) {
+  if (modalActive) {
+    gfx->fillRect(0, CY, LW, CH, BG);
+    gfx->setTextColor(INK, BG);
+    gfx->setCursor(8, CY + 6);
+    gfx->print("> " + modal.title);
+    gfx->drawFastHLine(8, CY + 18, LW - 16, DIM);
+    gfx->setTextColor(GREEN, BG);
+    if (modalBody.length()) {
+      drawWrapped(modalBody, 8, CY + 28, 50, 9, GREEN);
+    } else {
+      drawWrapped(modal.l1, 8, CY + 28, 50, 2, GREEN);
+      drawWrapped(modal.l2, 8, CY + 58, 50, 2, GREEN);
+      drawWrapped(modal.l3, 8, CY + 88, 50, 2, GREEN);
+    }
+    gfx->setTextColor(DIM, BG);
+    gfx->setCursor(8, CY + 152);
+    gfx->print("tap to go back");
+  } else if (uiPage == PAGE_FACE) {
     // Portrait art (240 wide) fills the left; 80px Pip-Boy vitals column right.
     if (!drawSDRaw4(group, CY, FACE_ROW0, CH))
       drawGeneratedFrame(frameForState(live), CY, FACE_ROW0, CH);
@@ -1370,6 +1393,7 @@ static void handleTap(uint16_t tx, uint16_t ty) {
   sendLine(String("{\"cmd\":\"touch\",\"x\":") + tx + ",\"y\":" + ty + "}");
 
   if (toastUntilMs) { toastUntilMs = 0; st.dirty = true; }  // any tap dismisses a banner
+  // (modal close happens in the touch-release handler — swipes included)
 
   // Tab bar: direct page select.
   if (ty < TAB_H) {
@@ -1384,6 +1408,17 @@ static void handleTap(uint16_t tx, uint16_t ty) {
 
   if (uiPage == PAGE_OPS && ty > TAB_H + 30) {
     if (st.action.active || st.waiting > 0) {
+      if (ty < TAB_H + 80) {
+        // tap on the approval TEXT: show the full command, don't resolve.
+        // (This also fixes taps on the text accidentally counting as
+        // ALLOW/DENY, which is what the x<160 split used to do here.)
+        modal.title = "APPROVAL DETAIL";
+        modalBody = st.action.detail.length() ? st.action.detail : st.action.text;
+        modalReturn = PAGE_OPS;
+        modalActive = true;
+        st.dirty = true;
+        return;
+      }
       const char* decision = tx < 160 ? "once" : "deny";
       sendPermissionDecision(decision);
       st.msg = String("decision: ") + decision;
@@ -1420,6 +1455,14 @@ static void handleTap(uint16_t tx, uint16_t ty) {
     triggerNamedMood("touch", "blink");
   } else if (uiPage == PAGE_FACE && tx < HERMES_FRAME_W) {
     triggerLocalMood("touch");
+  } else if (uiPage == PAGE_FACE) {
+    // vitals column: ask the host for the full stats picture
+    sendLine("{\"cmd\":\"stats\"}");
+    st.msg = "stats…";
+  } else if (uiPage == PAGE_NET) {
+    // link line: who's connected where, and where sound routes
+    sendLine("{\"cmd\":\"net\"}");
+    st.msg = "surfaces…";
   }
   st.dirty = true;
 }
@@ -1542,6 +1585,19 @@ static void applyJsonLine(const String &line) {
   }
   if (doc["type"] == "page") {
     int slot = doc["slot"] | 0;
+    if (slot == 9) {   // transient page: show now, tap returns
+      modal.title = String((const char*)(doc["title"] | "HOST"));
+      modal.l1 = String((const char*)(doc["lines"][0] | ""));
+      modal.l2 = String((const char*)(doc["lines"][1] | ""));
+      modal.l3 = String((const char*)(doc["lines"][2] | ""));
+      modalBody = "";
+      if (!modalActive) modalReturn = uiPage;
+      modalActive = true;
+      st.connected = true;
+      st.lastSeenMs = millis();
+      st.dirty = true;
+      return;
+    }
     if (slot < 0 || slot > 2) slot = 0;
     hostPages[slot].title = String((const char*)(doc["title"] | "HOST"));
     hostPages[slot].l1 = String((const char*)(doc["lines"][0] | ""));
@@ -1770,7 +1826,13 @@ void loop() {
     int dy = (int)touchLastY - (int)touchStartY;
     bool swipe = abs(dx) >= SWIPE_MIN_DX && abs(dy) <= SWIPE_MAX_DY;
     bool vswipe = abs(dy) >= SWIPE_MIN_DX && abs(dx) <= SWIPE_MAX_DY;
-    if (swipe) {
+    if (modalActive) {
+      // any gesture closes a transient page (swipes must not flip the
+      // hidden page underneath it)
+      modalActive = false;
+      modalBody = "";
+      uiPage = modalReturn;
+    } else if (swipe) {
       // Finger moving left (negative dx) reveals the next page, like a phone carousel.
       goPage(dx < 0 ? 1 : -1);
       st.msg = dx < 0 ? "swipe: next" : "swipe: prev";
