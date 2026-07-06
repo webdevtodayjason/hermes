@@ -144,6 +144,7 @@ static bool imuReady = false;
 static bool imuCfgOk = false;   // config writes verified by read-back
 static uint8_t imuStatus0 = 0;  // last STATUS0 (bit0 = accel data ready)
 static uint8_t imuRev = 0;      // revision reg 0x01 (expect 0x7C/0x7B)
+static int sensSda = SENSOR_SDA, sensScl = SENSOR_SCL;   // winner of the bus hunt
 static uint16_t imuReadFails = 0;  // consecutive burst-read failures
 static uint16_t imuRecovers = 0;   // successful runtime re-inits
 static uint8_t imuWhoNow = 0;      // WHO_AM_I at last recovery probe
@@ -944,7 +945,6 @@ static void pollPeripheralSensors() {
 }
 
 static String i2cScanReport = "{}";   // both buses: [[addr,reg0],…] — built once
-static int sensSda = SENSOR_SDA, sensScl = SENSOR_SCL;   // winner of the bus hunt
 
 static String scanBus(TwoWire &w) {
   String out = "[";
