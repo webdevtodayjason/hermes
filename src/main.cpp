@@ -151,9 +151,14 @@ static float lastAccelMag = 1.0f;
 static uint32_t lastSensorMs = 0;
 static uint32_t lastShakeMs = 0;
 // Physical-gesture state (IMU, 300ms poll). Thresholds are calibration
-// knobs — g-units on this QMI8658 at ±4g/8192 LSB.
-static bool quietMode = false;            // face-down = do-not-disturb
-static uint8_t faceDownPolls = 0;         // consecutive z<-0.75 samples
+// knobs — g-units on this QMI8658 at ±4g/8192 LSB. Face-down is detected
+// as attitude vs the LEARNED resting orientation (normalized dot product),
+// so chip mounting sign and stand angle don't matter.
+static bool quietMode = false;            // flipped-over = do-not-disturb
+static float baseX = 0, baseY = 0, baseZ = 0;  // resting gravity vector
+static bool baseSet = false;
+static uint8_t basePolls = 0;
+static uint8_t faceDownPolls = 0;         // consecutive dot<-0.35 samples
 static uint8_t uprightPolls = 0;
 static uint32_t lastMotionMs = 0;         // any mag-delta above noise floor
 static uint32_t prevTapPulseMs = 0;       // first pulse of a double-tap pair
@@ -789,9 +794,30 @@ static void pollPeripheralSensors() {
       uint32_t prevMotionMs = lastMotionMs;    // before this sample
       if (delta > 0.10f) lastMotionMs = now;   // noise floor — calibration knob
 
-      // face-down / upright: z flips sign against gravity. 5 polls = ~1.5s.
-      if (accelZ < -0.75f) { uprightPolls = 0; if (faceDownPolls < 250) faceDownPolls++; }
-      else if (accelZ > 0.5f) { faceDownPolls = 0; if (uprightPolls < 250) uprightPolls++; }
+      // learn the resting attitude: ~3s of stillness with sane gravity.
+      // ponytail: baseline is boot-captured only; re-seat the stand -> reboot
+      // (or add a slow EMA re-learn if that ever annoys)
+      if (!baseSet) {
+        if (delta < 0.06f && fabsf(mag - 1.0f) < 0.25f) {
+          if (++basePolls >= 10) {
+            baseX = accelX; baseY = accelY; baseZ = accelZ;
+            baseSet = true;
+            Serial.printf("{\"imu_base\":[%.2f,%.2f,%.2f]}\n", baseX, baseY, baseZ);
+          }
+        } else {
+          basePolls = 0;
+        }
+      }
+      // face-down = flipped ~opposite the resting attitude; upright = back
+      // near it. dot in [-1,1]; trigger <-0.35 (5 polls), release >+0.2 (3).
+      float dot = 1.0f;
+      if (baseSet) {
+        float bm = sqrtf(baseX * baseX + baseY * baseY + baseZ * baseZ);
+        if (bm > 0.5f && mag > 0.5f)
+          dot = (accelX * baseX + accelY * baseY + accelZ * baseZ) / (bm * mag);
+      }
+      if (dot < -0.35f) { uprightPolls = 0; if (faceDownPolls < 250) faceDownPolls++; }
+      else if (dot > 0.2f) { faceDownPolls = 0; if (uprightPolls < 250) uprightPolls++; }
       if (!quietMode && faceDownPolls == 5) {
         quietMode = true;
         gfx->setBrightness(10);   // screen is against the desk anyway
