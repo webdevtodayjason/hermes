@@ -748,32 +748,44 @@ static void initPowerDiagnostics() {
 
 static void initMotionAndRtc() {
   Wire.begin(SENSOR_SDA, SENSOR_SCL);
+  // QMI8658 must answer WHO_AM_I (0x00) == 0x05 — an ACK alone can be a
+  // stranger on the bus. RTC on the same bus reads fine, so failures here
+  // are chip-specific, not wiring.
   uint8_t who = 0;
-  imuReady = i2cRead8(0x6B, 0x00, &who);
-  activeQmiAddr = 0x6B;
-  if (!imuReady) {
-    imuReady = i2cRead8(0x6A, 0x00, &who);
-    activeQmiAddr = 0x6A;
+  imuReady = false;
+  for (uint8_t addr : {(uint8_t)0x6B, (uint8_t)0x6A}) {
+    if (i2cRead8(addr, 0x00, &who) && who == 0x05) {
+      imuReady = true;
+      activeQmiAddr = addr;
+      break;
+    }
   }
+  uint8_t rb[3] = {0xFF, 0xFF, 0xFF};
   if (imuReady) {
-    // QMI8658 boots with accel DISABLED and reads back zeros if config
-    // writes are lost — soft reset, then write-and-verify each register.
-    // CTRL1 0x40 = addr auto-increment, little-endian (parser reads LE;
-    // the old 0x60 also set big-endian — byte-swapped had data flowed).
+    // accel is DISABLED at power-on (silent zeros) — soft reset, settle,
+    // then write-and-verify CTRL1/2/7, retrying: writes right after reset
+    // can be ACKed and dropped while the core reboots.
+    // CTRL1 0x40 = addr auto-increment, little-endian (parser reads LE).
     i2cWrite8(activeQmiAddr, 0x60, 0xB0);   // RESET
-    delay(20);
+    delay(150);
     const uint8_t seq[][2] = {{0x02, 0x40}, {0x03, 0x23}, {0x08, 0x01}};
-    imuCfgOk = true;
-    for (auto &s : seq) {
-      i2cWrite8(activeQmiAddr, s[0], s[1]);
-      uint8_t rb = 0xFF;
-      if (!i2cRead8(activeQmiAddr, s[0], &rb) || rb != s[1]) imuCfgOk = false;
+    for (int attempt = 0; attempt < 3 && !imuCfgOk; attempt++) {
+      imuCfgOk = true;
+      for (int i = 0; i < 3; i++) {
+        i2cWrite8(activeQmiAddr, seq[i][0], seq[i][1]);
+        rb[i] = 0xFF;
+        if (!i2cRead8(activeQmiAddr, seq[i][0], &rb[i]) || rb[i] != seq[i][1])
+          imuCfgOk = false;
+      }
+      if (!imuCfgOk) delay(50);
     }
     delay(10);   // first samples need a beat after enable
   }
-  rtcReady = i2cRead8(PCF85063_ADDR, 0x04, &who);
-  Serial.printf("{\"imu\":\"%s\",\"imu_addr\":%u,\"imu_cfg\":\"%s\",\"rtc\":\"%s\"}\n",
-                imuReady ? "ok" : "off", activeQmiAddr,
+  uint8_t rtcprobe = 0;
+  rtcReady = i2cRead8(PCF85063_ADDR, 0x04, &rtcprobe);
+  Serial.printf("{\"imu\":\"%s\",\"imu_addr\":%u,\"who\":%u,\"rb\":[%u,%u,%u],"
+                "\"imu_cfg\":\"%s\",\"rtc\":\"%s\"}\n",
+                imuReady ? "ok" : "off", activeQmiAddr, who, rb[0], rb[1], rb[2],
                 imuCfgOk ? "ok" : "FAIL", rtcReady ? "ok" : "off");
 }
 
@@ -1790,7 +1802,8 @@ void loop() {
              ",\"acc\":[" + String(accelX, 2) + "," + String(accelY, 2) + "," +
              String(accelZ, 2) + "]" +
              ",\"base\":" + (baseSet ? "true" : "false") +
-             ",\"imu_cfg\":" + (imuCfgOk ? "true" : "false") + "}");
+             ",\"imu_cfg\":" + (imuCfgOk ? "true" : "false") +
+             ",\"imu\":" + (imuReady ? "true" : "false") + "}");
   }
 
   if (toastUntilMs && millis() >= toastUntilMs) {
